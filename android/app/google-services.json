@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "777049269791",
+    "project_id": "shopfinder-5f670",
+    "storage_bucket": "shopfinder-5f670.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:777049269791:android:5c886142b6b3cf5d87d72a",
+        "android_client_info": {
+          "package_name": "com.example.nearby_shop_finder"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "777049269791-jd2rivc2haokhbaiio0jtm84nbscs3mc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFbTR02YBFhG-t-0YYX4ldl_C6TFPqIMk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "777049269791-jd2rivc2haokhbaiio0jtm84nbscs3mc.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,10 @@
+cd nearby_shop_finder
+
+  # Web
+  flutter run -d chrome
+
+  # Android
+  flutter run
+
+  # iOS (nur auf macOS)
+  flutter run -d ios
