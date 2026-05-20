@@ -7,6 +7,8 @@ import 'firebase_config.dart';
 import 'providers/app_settings.dart';
 import 'screens/home_screen.dart';
 import 'services/auth_service.dart';
+import 'services/backend_service.dart';
+import 'services/company_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,27 +20,33 @@ void main() async {
     await Firebase.initializeApp();
   }
 
+  String backendUrl = dotenv.get('BACKEND_URL', fallback: 'http://localhost:3000');
+  if (!kIsWeb) {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      backendUrl = 'http://10.0.2.2:3000';
+    }
+  }
+  await BackendService().initialize(baseUrl: backendUrl);
+
   final settings = AppSettings();
   await settings.loadSettings();
-  runApp(ShopFinderApp(settings: settings));
+
+  await CompanyService().initialize();
+
+  runApp(ServicePlaceApp(settings: settings));
 }
 
-class ShopFinderApp extends StatelessWidget {
+class ServicePlaceApp extends StatelessWidget {
   final AppSettings settings;
-  const ShopFinderApp({super.key, required this.settings});
+  const ServicePlaceApp({super.key, required this.settings});
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: settings,
-      builder: (context, child) {
-        return MaterialApp(
-          title: 'ShopFinder',
-          debugShowCheckedModeBanner: false,
-          theme: _buildLightTheme(),
-          home: const AuthGate(),
-        );
-      },
+    return MaterialApp(
+      title: 'ServicePlace',
+      debugShowCheckedModeBanner: false,
+      theme: _buildLightTheme(),
+      home: const AuthGate(),
     );
   }
 
@@ -233,10 +241,21 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
-    FirebaseAuth.instance.authStateChanges().listen((_) {
+    FirebaseAuth.instance.authStateChanges().listen((user) async {
+      if (user != null) {
+        final userData = await BackendService().verifyFirebaseToken();
+        if (userData != null) {
+          _auth.updateFromBackend(userData);
+        }
+      } else {
+        await BackendService().clearToken();
+      }
       if (mounted) setState(() {});
     });
-    _auth.initialize(googleClientId: googleWebClientId).then((_) {
+    _auth.initialize(googleClientId: googleWebClientId).then((_) async {
+      if (_auth.isLoggedIn) {
+        await _auth.syncWithBackend();
+      }
       if (mounted) setState(() => _isLoading = false);
     });
   }
@@ -265,7 +284,7 @@ class _AuthGateState extends State<AuthGate> {
               ),
               const SizedBox(height: 24),
               Text(
-                'ShopFinder',
+                'ServicePlace',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),

@@ -7,6 +7,7 @@ class Shop {
   final double? rating;
   final int? userRatingsTotal;
   final String? phoneNumber;
+  final String? email;
   final String? website;
   final List<String> types;
   final String? photoReference;
@@ -18,6 +19,7 @@ class Shop {
   final List<String> tags;
   final String? cuisine;
   final String? imageUrl;
+  final String? logoUrl;
   final String? facebook;
   final String? instagram;
   final Map<String, dynamic>? rawData;
@@ -31,6 +33,7 @@ class Shop {
     this.rating,
     this.userRatingsTotal,
     this.phoneNumber,
+    this.email,
     this.website,
     this.types = const [],
     this.photoReference,
@@ -42,6 +45,7 @@ class Shop {
     this.tags = const [],
     this.cuisine,
     this.imageUrl,
+    this.logoUrl,
     this.facebook,
     this.instagram,
     this.rawData,

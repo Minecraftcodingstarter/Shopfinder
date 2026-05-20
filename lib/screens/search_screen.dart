@@ -12,6 +12,9 @@ import '../services/places_service.dart';
 import '../services/company_service.dart';
 import '../services/service_marketplace.dart';
 import '../widgets/shop_card.dart';
+import 'company_detail_screen.dart';
+
+enum _SearchMode { delivery, pickup }
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -29,6 +32,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final CompanyService _companyService = CompanyService();
   final ServiceMarketplace _marketplace = ServiceMarketplace();
 
+  _SearchMode _searchMode = _SearchMode.pickup;
   double _radius = 5000;
   String _sortBy = 'quality';
   bool _isSearching = false;
@@ -61,7 +65,10 @@ class _SearchScreenState extends State<SearchScreen> {
     final all = [...types, ...tags, name, cuisine].join(' ');
 
     if (types.contains('company')) {
-      return 'Eingetragen';
+      if (_selectedCategory != null && tags.contains(_selectedCategory!.toLowerCase())) {
+        return _selectedCategory!;
+      }
+      return tags.isNotEmpty ? tags.first : 'Eingetragen';
     }
     if (types.contains('service')) {
       return 'Dienstleistung';
@@ -170,13 +177,54 @@ class _SearchScreenState extends State<SearchScreen> {
       final latitude = _appState.currentLatitude!;
       final longitude = _appState.currentLongitude!;
 
-      // Eigene Unternehmen aus dem Backend holen
-      final companyShops = _companyService.companies
+      // Unternehmen aus dem Backend holen
+      var matchedCompanies = _companyService.companies
           .where((c) => keyword.isEmpty ||
               c.name.toLowerCase().contains(keyword.toLowerCase()) ||
-              c.category.toLowerCase().contains(keyword.toLowerCase()) ||
-              c.address.toLowerCase().contains(keyword.toLowerCase()))
-          .where(_isWithinServiceRadius)
+              c.categories.any((cat) => cat.toLowerCase().contains(keyword.toLowerCase())) ||
+              c.address.toLowerCase().contains(keyword.toLowerCase()));
+
+      if (_searchMode == _SearchMode.delivery) {
+        final deliveryCompanies = matchedCompanies.where((c) {
+          if (c.serviceRadius == null) return false;
+          if (c.serviceRadius! < 0) return true;
+          if (c.latitude == null || c.longitude == null) return false;
+          final distance = LocationService.calculateDistance(
+            latitude, longitude, c.latitude!, c.longitude!,
+          );
+          return distance <= c.serviceRadius! * 1000;
+        }).toList();
+
+        final deliveryShops = deliveryCompanies.map(_convertCompanyToShop).toList();
+        for (final shop in deliveryShops) {
+          if (shop.priceLevel == null) {
+            shop.priceLevel = _estimatePriceLevel(shop);
+          }
+        }
+
+        if (!mounted) return;
+        if (deliveryShops.isEmpty) {
+          setState(() {
+            _errorMessage = 'Keine Unternehmen gefunden, die zu Ihnen kommen können.';
+            _results = [];
+            _isSearching = false;
+          });
+          return;
+        }
+        setState(() {
+          _results = deliveryShops;
+          _isSearching = false;
+        });
+        return;
+      }
+
+      final companyShops = matchedCompanies
+          .where((c) => c.serviceRadius == null || c.serviceRadius! < 0 ||
+              c.serviceRadius! <= 0 ||
+              (c.latitude != null && c.longitude != null &&
+               LocationService.calculateDistance(
+                 latitude, longitude, c.latitude!, c.longitude!,
+               ) <= (c.serviceRadius! * 1000)))
           .map(_convertCompanyToShop)
           .toList();
 
@@ -200,7 +248,7 @@ class _SearchScreenState extends State<SearchScreen> {
             latitude: shop.latitude, longitude: shop.longitude,
             rating: shop.rating ?? match.rating,
             userRatingsTotal: shop.userRatingsTotal ?? match.userRatingsTotal,
-            phoneNumber: shop.phoneNumber, website: shop.website,
+            phoneNumber: shop.phoneNumber, email: shop.email, website: shop.website,
             types: shop.types, photoReference: shop.photoReference,
             distance: shop.distance,
             priceLevel: shop.priceLevel ?? match.priceLevel,
@@ -273,6 +321,7 @@ class _SearchScreenState extends State<SearchScreen> {
           rating: shop.rating ?? geminiMatch.rating,
           userRatingsTotal: shop.userRatingsTotal ?? geminiMatch.userRatingsTotal,
           phoneNumber: shop.phoneNumber,
+          email: shop.email,
           website: shop.website,
           types: shop.types,
           photoReference: shop.photoReference,
@@ -343,12 +392,14 @@ class _SearchScreenState extends State<SearchScreen> {
     return Shop(
       id: c.id,
       name: c.name,
-      address: c.address,
+      address: c.hideAddress ? '(Adresse nicht öffentlich)' : c.address,
+      logoUrl: c.logoUrl.isNotEmpty ? c.logoUrl : null,
       latitude: c.latitude ?? _appState.currentLatitude ?? LocationService.defaultLat,
       longitude: c.longitude ?? _appState.currentLongitude ?? LocationService.defaultLng,
       rating: c.reviewCount > 0 ? c.averageRating : null,
       userRatingsTotal: c.reviewCount,
       phoneNumber: c.phoneNumber.isNotEmpty ? c.phoneNumber : null,
+      email: c.email.isNotEmpty ? c.email : null,
       website: c.website,
       types: ['company'],
       photoReference: null,
@@ -357,6 +408,20 @@ class _SearchScreenState extends State<SearchScreen> {
       openingHours: null,
       isOpen: null,
       description: c.description.isNotEmpty ? c.description : null,
+      tags: c.categories,
+    );
+  }
+
+  Widget _buildLetterIcon(Shop shop, bool isCompany) {
+    return Center(
+      child: Text(
+        shop.name.isNotEmpty ? shop.name[0].toUpperCase() : '?',
+        style: TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.bold,
+          color: isCompany ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.primary,
+        ),
+      ),
     );
   }
 
@@ -378,20 +443,6 @@ class _SearchScreenState extends State<SearchScreen> {
       openingHours: null,
       isOpen: null,
     );
-  }
-
-  bool _isWithinServiceRadius(Company company) {
-    if (company.serviceRadius == null || company.serviceRadius! <= 0) return true;
-    if (company.latitude == null || company.longitude == null) return true;
-    if (_appState.currentLatitude == null || _appState.currentLongitude == null) return true;
-
-    final distance = LocationService.calculateDistance(
-      _appState.currentLatitude!,
-      _appState.currentLongitude!,
-      company.latitude!,
-      company.longitude!,
-    );
-    return distance <= company.serviceRadius! * 1000;
   }
 
   void _onSortChanged(String sortBy) {
@@ -464,14 +515,15 @@ class _SearchScreenState extends State<SearchScreen> {
             MarkerLayer(markers: markers),
             CircleLayer(
               circles: [
-                CircleMarker(
-                  point: center,
-                  radius: _radius,
-                  useRadiusInMeter: true,
-                  color: Theme.of(context).colorScheme.primary.withAlpha(30),
-                  borderColor: Theme.of(context).colorScheme.primary,
-                  borderStrokeWidth: 2,
-                ),
+                if (_searchMode == _SearchMode.pickup)
+                  CircleMarker(
+                    point: center,
+                    radius: _radius,
+                    useRadiusInMeter: true,
+                    color: Theme.of(context).colorScheme.primary.withAlpha(30),
+                    borderColor: Theme.of(context).colorScheme.primary,
+                    borderStrokeWidth: 2,
+                  ),
                 ..._results.where((s) => s.types.contains('company')).map((s) {
                   final company = _companyService.getCompany(s.id);
                   if (company == null || company.serviceRadius == null || company.serviceRadius! <= 0) return null;
@@ -532,16 +584,20 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ],
           ),
-          child: Center(
-            child: Text(
-              letter,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: (isHovered || isSelected) ? 18 : 14,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+          child: shop.logoUrl != null
+              ? ClipOval(
+                  child: Image.network(shop.logoUrl!, fit: BoxFit.cover,
+                    width: size, height: size,
+                    errorBuilder: (_, __, ___) => Center(
+                      child: Text(letter, style: TextStyle(color: Colors.white,
+                        fontSize: (isHovered || isSelected) ? 18 : 14, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                )
+              : Center(
+                  child: Text(letter, style: TextStyle(color: Colors.white,
+                    fontSize: (isHovered || isSelected) ? 18 : 14, fontWeight: FontWeight.bold)),
+                ),
         ),
       ),
     );
@@ -551,7 +607,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ShopFinder'),
+        title: const Text('ServicePlace'),
         centerTitle: true,
         actions: [
           IconButton(
@@ -565,10 +621,12 @@ class _SearchScreenState extends State<SearchScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
+            _buildModeToggle(),
+            const SizedBox(height: 12),
             _buildSearchBar(),
             const SizedBox(height: 16),
-            _buildRadiusSlider(),
-            const SizedBox(height: 8),
+            if (_searchMode == _SearchMode.pickup) _buildRadiusSlider(),
+            if (_searchMode == _SearchMode.pickup) const SizedBox(height: 8),
             _buildSortDropdown(),
             const SizedBox(height: 4),
             _buildCategoryFilter(),
@@ -611,6 +669,108 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildModeToggle() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _searchMode = _SearchMode.pickup;
+                  _results = [];
+                  _hasSearched = false;
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: _searchMode == _SearchMode.pickup
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.directions_walk,
+                      size: 18,
+                      color: _searchMode == _SearchMode.pickup
+                          ? Colors.white
+                          : Colors.grey[600],
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Ich gehe zum Geschäft',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: _searchMode == _SearchMode.pickup
+                            ? Colors.white
+                            : Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _searchMode = _SearchMode.delivery;
+                  _results = [];
+                  _hasSearched = false;
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: _searchMode == _SearchMode.delivery
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.local_shipping,
+                      size: 18,
+                      color: _searchMode == _SearchMode.delivery
+                          ? Colors.white
+                          : Colors.grey[600],
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Sie kommen zu mir',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: _searchMode == _SearchMode.delivery
+                            ? Colors.white
+                            : Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -921,7 +1081,7 @@ class _SearchScreenState extends State<SearchScreen> {
           id: old.id, name: old.name, address: old.address,
           latitude: old.latitude, longitude: old.longitude,
           rating: old.rating, userRatingsTotal: old.userRatingsTotal,
-          phoneNumber: old.phoneNumber, website: old.website,
+          phoneNumber: old.phoneNumber, email: old.email, website: old.website,
           types: old.types, photoReference: old.photoReference,
           distance: old.distance, priceLevel: old.priceLevel,
           openingHours: old.openingHours, isOpen: old.isOpen,
@@ -949,7 +1109,7 @@ class _SearchScreenState extends State<SearchScreen> {
         latitude: old.latitude, longitude: old.longitude,
         rating: old.rating ?? rating,
         userRatingsTotal: old.userRatingsTotal,
-        phoneNumber: old.phoneNumber, website: old.website,
+        phoneNumber: old.phoneNumber, email: old.email, website: old.website,
         types: old.types, photoReference: old.photoReference,
         distance: old.distance,
         priceLevel: old.priceLevel ?? priceLevel ?? _estimatePriceLevel(old),
@@ -999,6 +1159,17 @@ class _SearchScreenState extends State<SearchScreen> {
     final isFromCompanyService = isCompany && _companyService.getCompany(shop.id) != null;
     _enrichShopIfNeeded(shop);
 
+    if (isCompany && isFromCompanyService) {
+      final company = _companyService.getCompany(shop.id)!;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CompanyDetailScreen(shop: shop, company: company),
+        ),
+      );
+      return;
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1006,7 +1177,7 @@ class _SearchScreenState extends State<SearchScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: isFromCompanyService ? 0.65 : 0.55,
+        initialChildSize: 0.55,
         minChildSize: 0.3,
         maxChildSize: 0.9,
         expand: false,
@@ -1040,18 +1211,15 @@ class _SearchScreenState extends State<SearchScreen> {
                             : Theme.of(context).colorScheme.primaryContainer,
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: Center(
-                        child: Text(
-                          shop.name.isNotEmpty ? shop.name[0].toUpperCase() : '?',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: isCompany
-                                ? Theme.of(context).colorScheme.secondary
-                                : Theme.of(context).colorScheme.primary,
-                          ),
-                        ),
-                      ),
+                      child: shop.logoUrl != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: Image.network(shop.logoUrl!, fit: BoxFit.cover,
+                                width: 56, height: 56,
+                                errorBuilder: (_, __, ___) => _buildLetterIcon(shop, isCompany),
+                              ),
+                            )
+                          : _buildLetterIcon(shop, isCompany),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -1106,6 +1274,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                 if (shop.address.isNotEmpty) _buildInfoRow(Icons.location_on, shop.address),
                 if (shop.phoneNumber != null) _buildInfoRow(Icons.phone, shop.phoneNumber!),
+                if (shop.email != null) _buildInfoRow(Icons.email, shop.email!),
                 if (shop.website != null) _buildInfoRow(Icons.link, shop.website!),
                 _buildInfoRow(
                   Icons.attach_money,
@@ -1125,19 +1294,6 @@ class _SearchScreenState extends State<SearchScreen> {
                     label: const Text('Route öffnen (Maps)'),
                   ),
                 ),
-                if (isFromCompanyService) ...[
-                  const SizedBox(height: 16),
-                  _buildReviewsSection(shop.id),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () => _showReviewDialog(shop.id, shop.name),
-                      icon: const Icon(Icons.rate_review_outlined),
-                      label: const Text('Bewertung abgeben'),
-                    ),
-                  ),
-                ],
               ],
             ),
           );
@@ -1394,7 +1550,7 @@ class _SearchScreenState extends State<SearchScreen> {
               child: const Text('Abbrechen'),
             ),
             FilledButton(
-              onPressed: () {
+              onPressed: () async {
                 if (nameCtrl.text.trim().isEmpty) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
                     const SnackBar(content: Text('Bitte geben Sie Ihren Namen ein.')),
@@ -1409,8 +1565,8 @@ class _SearchScreenState extends State<SearchScreen> {
                   comment: commentCtrl.text.trim().isNotEmpty ? commentCtrl.text.trim() : null,
                   timestamp: DateTime.now(),
                 );
-                _companyService.addReview(companyId, review);
-                Navigator.pop(ctx);
+                await _companyService.addReview(companyId, review);
+                if (ctx.mounted) Navigator.pop(ctx);
                 setState(() {});
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -1425,5 +1581,226 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
       ),
     );
+  }
+
+  void _showChatDialog(Shop shop) {
+    final messages = <Map<String, String>>[];
+    final msgCtrl = TextEditingController();
+    final scrollCtrl = ScrollController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+          ),
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.7,
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(
+                          color: Theme.of(ctx).colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: shop.logoUrl != null
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: Image.network(shop.logoUrl!, fit: BoxFit.cover,
+                                  width: 40, height: 40,
+                                  errorBuilder: (_, __, ___) => _buildLetterIcon(shop, false),
+                                ),
+                              )
+                            : Center(
+                                child: Text(
+                                  shop.name.isNotEmpty ? shop.name[0].toUpperCase() : '?',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Theme.of(ctx).colorScheme.secondary,
+                                  ),
+                                ),
+                              ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(shop.name,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            Text('Online',
+                              style: TextStyle(fontSize: 12, color: Colors.green[600])),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                ),
+                if (shop.phoneNumber != null || shop.email != null)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    color: Colors.grey[50],
+                    child: Row(
+                      children: [
+                        Icon(Icons.contact_mail, size: 16, color: Colors.grey[600]),
+                        const SizedBox(width: 8),
+                        if (shop.phoneNumber != null) ...[
+                          GestureDetector(
+                            onTap: () async {
+                              final uri = Uri.parse('tel:${shop.phoneNumber!}');
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              }
+                            },
+                            child: Text(shop.phoneNumber!,
+                              style: TextStyle(fontSize: 13, color: Colors.blue[700])),
+                          ),
+                          if (shop.email != null) Text('  |  ', style: TextStyle(color: Colors.grey[400])),
+                        ],
+                        if (shop.email != null)
+                          GestureDetector(
+                            onTap: () async {
+                              final uri = Uri.parse('mailto:${shop.email!}');
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              }
+                            },
+                            child: Text(shop.email!,
+                              style: TextStyle(fontSize: 13, color: Colors.blue[700])),
+                          ),
+                      ],
+                    ),
+                  ),
+                Expanded(
+                  child: messages.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.chat_bubble_outline, size: 48, color: Colors.grey[300]),
+                              const SizedBox(height: 12),
+                              Text('Schreiben Sie eine Nachricht',
+                                style: TextStyle(color: Colors.grey[500], fontSize: 15)),
+                              const SizedBox(height: 4),
+                              Text('Die Firma wird per E-Mail oder Telefon kontaktiert',
+                                style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          controller: scrollCtrl,
+                          padding: const EdgeInsets.all(16),
+                          itemCount: messages.length,
+                          itemBuilder: (ctx, i) {
+                            final msg = messages[i];
+                            final isMe = msg['sender'] == 'me';
+                            return Align(
+                              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: isMe
+                                      ? Theme.of(ctx).colorScheme.primary
+                                      : Colors.grey[100],
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: const Radius.circular(18),
+                                    topRight: const Radius.circular(18),
+                                    bottomLeft: isMe ? const Radius.circular(18) : Radius.zero,
+                                    bottomRight: isMe ? Radius.zero : const Radius.circular(18),
+                                  ),
+                                ),
+                                constraints: BoxConstraints(
+                                  maxWidth: MediaQuery.of(ctx).size.width * 0.7,
+                                ),
+                                child: Text(
+                                  msg['text'] ?? '',
+                                  style: TextStyle(
+                                    color: isMe ? Colors.white : Colors.black87,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border(top: BorderSide(color: Colors.grey[200]!)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: msgCtrl,
+                          decoration: InputDecoration(
+                            hintText: 'Nachricht eingeben...',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Colors.grey[100],
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          ),
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _sendChatMessage(setDialogState, msgCtrl, messages, scrollCtrl, shop),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      CircleAvatar(
+                        backgroundColor: Theme.of(ctx).colorScheme.primary,
+                        radius: 22,
+                        child: IconButton(
+                          icon: const Icon(Icons.send, color: Colors.white, size: 18),
+                          onPressed: () => _sendChatMessage(setDialogState, msgCtrl, messages, scrollCtrl, shop),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _sendChatMessage(void Function(void Function()) setDialogState, TextEditingController msgCtrl, List<Map<String, String>> messages, ScrollController scrollCtrl, Shop shop) {
+    if (msgCtrl.text.trim().isEmpty) return;
+    setDialogState(() {
+      messages.add({'sender': 'me', 'text': msgCtrl.text.trim()});
+      msgCtrl.clear();
+    });
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (scrollCtrl.hasClients) {
+        scrollCtrl.animateTo(
+          scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 }

@@ -7,7 +7,7 @@ class Company {
   String phoneNumber;
   String email;
   String? website;
-  String category;
+  List<String> categories;
   double? latitude;
   double? longitude;
   double? serviceRadius;
@@ -17,6 +17,11 @@ class Company {
   double averageRating;
   int reviewCount;
   List<CompanyReview> reviews;
+  List<String> images;
+  bool hideAddress;
+  bool hasWhatsapp;
+  bool wantsAdvertising;
+  String logoUrl;
 
   Company({
     required this.id,
@@ -27,7 +32,7 @@ class Company {
     this.phoneNumber = '',
     this.email = '',
     this.website,
-    this.category = 'Sonstiges',
+    this.categories = const ['Sonstiges'],
     this.latitude,
     this.longitude,
     this.serviceRadius,
@@ -37,8 +42,18 @@ class Company {
     this.averageRating = 0.0,
     this.reviewCount = 0,
     List<CompanyReview>? reviews,
+    List<String>? images,
+    this.hideAddress = false,
+    this.hasWhatsapp = false,
+    this.wantsAdvertising = false,
+    this.logoUrl = '',
   })  : createdAt = createdAt ?? DateTime.now(),
-        reviews = reviews ?? [];
+        reviews = reviews ?? [],
+        images = images ?? [];
+
+  bool get isUnlimitedRadius => serviceRadius != null && serviceRadius! < 0;
+  bool get isDelivery => serviceRadius != null && serviceRadius! >= 0;
+  bool get isFixedLocation => serviceRadius == null;
 
   void addView() {
     viewCount++;
@@ -59,7 +74,7 @@ class Company {
     'phoneNumber': phoneNumber,
     'email': email,
     'website': website,
-    'category': category,
+    'categories': categories,
     'latitude': latitude,
     'longitude': longitude,
     'serviceRadius': serviceRadius,
@@ -69,6 +84,11 @@ class Company {
     'averageRating': averageRating,
     'reviewCount': reviewCount,
     'reviews': reviews.map((r) => r.toJson()).toList(),
+    'images': images,
+    'hideAddress': hideAddress,
+    'hasWhatsapp': hasWhatsapp,
+    'wantsAdvertising': wantsAdvertising,
+    'logoUrl': logoUrl,
   };
 
   factory Company.fromJson(Map<String, dynamic> json) => Company(
@@ -80,7 +100,10 @@ class Company {
     phoneNumber: json['phoneNumber'] as String? ?? '',
     email: json['email'] as String? ?? '',
     website: json['website'] as String?,
-    category: json['category'] as String? ?? 'Sonstiges',
+    categories: (json['categories'] as List<dynamic>?)
+        ?.map((e) => e.toString())
+        .toList() ??
+        (json['category'] != null ? [json['category'] as String] : ['Sonstiges']),
     latitude: (json['latitude'] as num?)?.toDouble(),
     longitude: (json['longitude'] as num?)?.toDouble(),
     serviceRadius: (json['serviceRadius'] as num?)?.toDouble(),
@@ -92,6 +115,13 @@ class Company {
     reviews: (json['reviews'] as List<dynamic>?)
         ?.map((e) => CompanyReview.fromJson(e as Map<String, dynamic>))
         .toList() ?? [],
+    images: (json['images'] as List<dynamic>?)
+        ?.map((e) => e.toString())
+        .toList() ?? [],
+    hideAddress: json['hideAddress'] as bool? ?? false,
+    hasWhatsapp: json['hasWhatsapp'] as bool? ?? false,
+    wantsAdvertising: json['wantsAdvertising'] as bool? ?? false,
+    logoUrl: json['logoUrl'] as String? ?? '',
   );
 }
 

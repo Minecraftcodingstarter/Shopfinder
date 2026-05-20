@@ -69,7 +69,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               _buildSettingTile(
                 icon: Icons.info_outline,
-                title: 'Über ShopFinder',
+                title: 'Über ServicePlace',
                 subtitle: 'Version 1.0.0',
                 onTap: () => _showAboutDialog(),
               ),
@@ -170,15 +170,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: const Text('Abbrechen'),
           ),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               final service = CompanyService();
               for (final c in service.companies) {
-                service.deleteCompany(c.id);
+                await service.deleteCompany(c.id);
               }
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Alle Daten wurden gelöscht')),
-              );
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Alle Daten wurden gelöscht')),
+                );
+              }
             },
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Alles löschen'),
@@ -191,9 +193,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _showAboutDialog() {
     showAboutDialog(
       context: context,
-      applicationName: 'ShopFinder',
+      applicationName: 'ServicePlace',
       applicationVersion: '1.0.0',
-      applicationLegalese: '© 2025 ShopFinder',
+      applicationLegalese: '© 2025 ServicePlace',
       applicationIcon: Container(
         width: 48,
         height: 48,

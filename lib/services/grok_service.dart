@@ -1,22 +1,15 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import '../config/api_keys.dart';
+import 'backend_service.dart';
 import '../models/shop_model.dart';
 
 class GrokService {
-  final http.Client _client = http.Client();
-  static const String _endpoint = 'https://api.openai.com/v1/responses';
-  static const String _model = 'grok-mini';
-
   Future<List<Shop>> searchShops({
     required String query,
     required double latitude,
     required double longitude,
     required double radius,
   }) async {
-    if (ApiKeys.grokApiKey.isEmpty) return [];
-
     final prompt = '''
 Du bist ein intelligenter Suchassistent für lokale Shops und Dienstleistungen.
 Gegeben ist eine Anfrage: "$query" und ein Standort mit Breite $latitude, Länge $longitude.
@@ -32,38 +25,21 @@ Gib nur eine JSON-Liste zurück. Jeder Eintrag muss folgende Felder enthalten:
 Antworte nur mit dem reinen JSON-Array, ohne zusätzliche Erklärungen.
 ''';
 
-    final response = await _client.post(
-      Uri.parse(_endpoint),
-      headers: {
-        'Authorization': 'Bearer ${ApiKeys.grokApiKey}',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'model': _model,
+    try {
+      final data = await BackendService().post('/api/proxy/grok', body: {
         'input': prompt,
         'temperature': 0.2,
-        'max_output_tokens': 400,
-      }),
-    );
+        'maxOutputTokens': 400,
+      });
 
-    if (response.statusCode == 401 || response.statusCode == 403) {
-      debugPrint('Grok API authentication failed (${response.statusCode}). Bitte überprüfe den API-Key.');
-      return [];
-    }
+      if (data == null) return [];
 
-    if (response.statusCode != 200) {
-      debugPrint('Grok API error: ${response.statusCode} ${response.body}');
-      return [];
-    }
+      final rawText = _extractResponseText(data);
+      if (rawText.isEmpty) return [];
 
-    final responseBody = jsonDecode(response.body);
-    final String rawText = _extractResponseText(responseBody);
-    if (rawText.isEmpty) return [];
+      final jsonText = _extractJsonArray(rawText);
+      if (jsonText.isEmpty) return [];
 
-    final jsonText = _extractJsonArray(rawText);
-    if (jsonText.isEmpty) return [];
-
-    try {
       final decoded = jsonDecode(jsonText) as List<dynamic>;
       return decoded.whereType<Map<String, dynamic>>().map((place) {
         final lat = double.tryParse(place['latitude']?.toString() ?? '') ?? 0.0;
@@ -77,6 +53,7 @@ Antworte nur mit dem reinen JSON-Array, ohne zusätzliche Erklärungen.
           rating: null,
           userRatingsTotal: null,
           phoneNumber: null,
+          email: null,
           website: null,
           types: ['grok'],
           photoReference: null,
@@ -87,7 +64,7 @@ Antworte nur mit dem reinen JSON-Array, ohne zusätzliche Erklärungen.
         );
       }).where((shop) => shop.latitude != 0 && shop.longitude != 0).toList();
     } catch (e) {
-      debugPrint('Grok parsing error: $e');
+      debugPrint('Grok service error: $e');
       return [];
     }
   }

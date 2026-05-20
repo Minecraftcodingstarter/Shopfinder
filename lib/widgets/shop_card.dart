@@ -58,18 +58,15 @@ class ShopCard extends StatelessWidget {
                           : _getIconBgColor(theme).withAlpha(30),
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: Center(
-                      child: Text(
-                        shop.name.isNotEmpty ? shop.name[0].toUpperCase() : '?',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: isCompany
-                              ? theme.colorScheme.secondary
-                              : _getIconBgColor(theme),
-                        ),
-                      ),
-                    ),
+                    child: isCompany && shop.logoUrl != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Image.network(shop.logoUrl!, fit: BoxFit.cover,
+                              width: 52, height: 52,
+                              errorBuilder: (_, __, ___) => _buildLetter(shop, theme, isCompany),
+                            ),
+                          )
+                        : _buildLetter(shop, theme, isCompany),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -200,6 +197,19 @@ class ShopCard extends StatelessWidget {
       default:
         return 'Keine Preisangabe';
     }
+  }
+
+  Widget _buildLetter(Shop shop, ThemeData theme, bool isCompany) {
+    return Center(
+      child: Text(
+        shop.name.isNotEmpty ? shop.name[0].toUpperCase() : '?',
+        style: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          color: isCompany ? theme.colorScheme.secondary : _getIconBgColor(theme),
+        ),
+      ),
+    );
   }
 
   Color _getIconBgColor(ThemeData theme) {

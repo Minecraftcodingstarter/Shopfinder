@@ -23,6 +23,13 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
 
+  int _authMethod = 0;
+  final _phoneCtrl = TextEditingController();
+  final _smsCodeCtrl = TextEditingController();
+  bool _phoneCodeSent = false;
+  bool _phoneLoading = false;
+  String _phoneNumber = '';
+
   @override
   void initState() {
     super.initState();
@@ -37,6 +44,8 @@ class _AuthScreenState extends State<AuthScreen> {
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _smsCodeCtrl.dispose();
     super.dispose();
   }
 
@@ -197,138 +206,289 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'ShopFinder',
+                  'ServicePlace',
                   style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _isLogin ? 'Melden Sie sich an' : 'Erstellen Sie ein Konto',
+                  'Melden Sie sich an',
                   style: TextStyle(fontSize: 15, color: Colors.grey[600]),
                 ),
-                const SizedBox(height: 40),
-                if (!_isLogin)
-                  TextField(
-                    controller: _nameCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Name (optional)',
-                      prefixIcon: Icon(Icons.person_outline),
-                    ),
-                    textInputAction: TextInputAction.next,
-                  ),
-                if (!_isLogin) const SizedBox(height: 16),
-                TextField(
-                  controller: _emailCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'E-Mail-Adresse',
-                    prefixIcon: Icon(Icons.email_outlined),
-                  ),
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  autocorrect: false,
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _passwordCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Passwort',
-                    prefixIcon: const Icon(Icons.lock_outlined),
-                    suffixText: _isLogin ? null : 'min. 6 Zeichen',
-                    suffixStyle: TextStyle(fontSize: 11, color: Colors.grey[500]),
-                  ),
-                  obscureText: true,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _submit(),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withAlpha(15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline, size: 18, color: Colors.red),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _error!,
-                            style: const TextStyle(color: Colors.red, fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
                 const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: _isLoading ? null : _submit,
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : Text(_isLogin ? 'Anmelden' : 'Konto erstellen', style: const TextStyle(fontSize: 16)),
-                  ),
-                ),
-                if (_isLogin) ...[
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: _showPasswordResetDialog,
-                    child: Text(
-                      'Passwort vergessen?',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 12),
                 Row(
                   children: [
-                    Expanded(child: Divider(color: Colors.grey[300])),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text('oder', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                    Expanded(
+                      child: _buildMethodTab(0, Icons.email_outlined, 'E-Mail'),
                     ),
-                    Expanded(child: Divider(color: Colors.grey[300])),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildMethodTab(1, Icons.phone_outlined, 'Telefon'),
+                    ),
                   ],
                 ),
-                if (AuthService().isGoogleSignInAvailable) ...[
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _isLoading ? null : _signInWithGoogle,
-                      icon: const Icon(Icons.login),
-                      label: const Text('Mit Google anmelden'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      _isLogin = !_isLogin;
-                      _error = null;
-                    });
-                  },
-                  child: Text(
-                    _isLogin ? 'Noch kein Konto? Jetzt registrieren' : 'Bereits ein Konto? Anmelden',
-                  ),
-                ),
+                const SizedBox(height: 24),
+                if (_authMethod == 0) _buildEmailAuth(theme),
+                if (_authMethod == 1) _buildPhoneAuth(theme),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildMethodTab(int index, IconData icon, String label) {
+    final isActive = _authMethod == index;
+    return GestureDetector(
+      onTap: () => setState(() {
+        _authMethod = index;
+        _error = null;
+        _phoneCodeSent = false;
+      }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isActive ? Theme.of(context).colorScheme.primary : Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: isActive ? Colors.white : Colors.grey[600]),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                color: isActive ? Colors.white : Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmailAuth(ThemeData theme) {
+    return Column(
+      children: [
+        if (!_isLogin)
+          TextField(
+            controller: _nameCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Name (optional)',
+              prefixIcon: Icon(Icons.person_outline),
+            ),
+            textInputAction: TextInputAction.next,
+          ),
+        if (!_isLogin) const SizedBox(height: 16),
+        TextField(
+          controller: _emailCtrl,
+          decoration: const InputDecoration(
+            labelText: 'E-Mail-Adresse',
+            prefixIcon: Icon(Icons.email_outlined),
+          ),
+          keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.next,
+          autocorrect: false,
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _passwordCtrl,
+          decoration: InputDecoration(
+            labelText: 'Passwort',
+            prefixIcon: const Icon(Icons.lock_outlined),
+            suffixText: _isLogin ? null : 'min. 6 Zeichen',
+            suffixStyle: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          ),
+          obscureText: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _submit(),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          _buildErrorBox(),
+        ],
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: _isLoading ? null : _submit,
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+            child: _isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : Text(_isLogin ? 'Anmelden' : 'Konto erstellen', style: const TextStyle(fontSize: 16)),
+          ),
+        ),
+        if (_isLogin) ...[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _showPasswordResetDialog,
+            child: Text(
+              'Passwort vergessen?',
+              style: TextStyle(color: Colors.grey[600], fontSize: 13),
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(child: Divider(color: Colors.grey[300])),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text('oder', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+            ),
+            Expanded(child: Divider(color: Colors.grey[300])),
+          ],
+        ),
+        if (AuthService().isGoogleSignInAvailable) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _isLoading ? null : _signInWithGoogle,
+              icon: const Icon(Icons.login),
+              label: const Text('Mit Google anmelden'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
+        TextButton(
+          onPressed: () {
+            setState(() {
+              _isLogin = !_isLogin;
+              _error = null;
+            });
+          },
+          child: Text(
+            _isLogin ? 'Noch kein Konto? Jetzt registrieren' : 'Bereits ein Konto? Anmelden',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPhoneAuth(ThemeData theme) {
+    return Column(
+      children: [
+        if (!_phoneCodeSent) ...[
+          TextField(
+            controller: _phoneCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Telefonnummer',
+              hintText: 'z.B. +49 123 456789',
+              prefixIcon: Icon(Icons.phone_outlined),
+            ),
+            keyboardType: TextInputType.text,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _sendPhoneCode(),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            _buildErrorBox(),
+          ],
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _phoneLoading ? null : _sendPhoneCode,
+              icon: _phoneLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
+                    )
+                  : const Icon(Icons.smartphone),
+              label: Text(_phoneLoading ? 'Code wird gesendet...' : 'Bestätigungscode senden'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+        ] else ...[
+          Text(
+            'Code wurde an $_phoneNumber gesendet',
+            style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          TextField(
+            controller: _smsCodeCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Bestätigungscode',
+              hintText: 'Code eingeben',
+              prefixIcon: Icon(Icons.sms),
+            ),
+            keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _verifyPhoneCode(),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            _buildErrorBox(),
+          ],
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _phoneLoading ? null : _verifyPhoneCode,
+              icon: _phoneLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
+                    )
+                  : const Icon(Icons.check),
+              label: Text(_phoneLoading ? 'Wird überprüft...' : 'Bestätigen'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _phoneCodeSent = false;
+                _error = null;
+                _smsCodeCtrl.clear();
+              });
+            },
+            child: const Text('Andere Telefonnummer verwenden'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildErrorBox() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.withAlpha(15),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, size: 18, color: Colors.red),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _error!,
+              style: const TextStyle(color: Colors.red, fontSize: 13),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -380,6 +540,62 @@ class _AuthScreenState extends State<AuthScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _sendPhoneCode() async {
+    final phone = _phoneCtrl.text.trim();
+    if (phone.isEmpty) {
+      setState(() => _error = 'Bitte geben Sie eine Telefonnummer ein.');
+      return;
+    }
+    setState(() {
+      _error = null;
+      _phoneLoading = true;
+    });
+    _phoneNumber = phone;
+    _auth.sendPhoneCode(
+      phoneNumber: phone,
+      onCodeSent: () {
+        if (!mounted) return;
+        setState(() {
+          _phoneCodeSent = true;
+          _phoneLoading = false;
+        });
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() {
+          _error = error;
+          _phoneLoading = false;
+        });
+      },
+      onAutoVerified: () {
+        if (!mounted) return;
+        widget.onSuccess();
+      },
+    );
+  }
+
+  Future<void> _verifyPhoneCode() async {
+    final code = _smsCodeCtrl.text.trim();
+    if (code.isEmpty) {
+      setState(() => _error = 'Bitte geben Sie den Bestätigungscode ein.');
+      return;
+    }
+    setState(() {
+      _error = null;
+      _phoneLoading = true;
+    });
+    final error = await _auth.verifyPhoneCode(code);
+    if (!mounted) return;
+    if (error != null) {
+      setState(() {
+        _error = error;
+        _phoneLoading = false;
+      });
+    } else {
+      widget.onSuccess();
+    }
   }
 
   Future<void> _signInWithGoogle() async {

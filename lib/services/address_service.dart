@@ -39,7 +39,7 @@ class AddressService {
       );
 
       final response = await _client.get(url, headers: {
-        'User-Agent': 'ShopFinder/1.0',
+        'User-Agent': 'ServicePlace/1.0',
         'Accept-Language': 'de',
       });
 

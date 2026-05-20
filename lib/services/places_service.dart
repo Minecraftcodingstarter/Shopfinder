@@ -80,6 +80,7 @@ class PlacesService {
         rating: shop.rating,
         userRatingsTotal: shop.userRatingsTotal,
         phoneNumber: shop.phoneNumber,
+        email: shop.email,
         website: shop.website,
         types: [...shop.types],
         photoReference: shop.photoReference,
@@ -128,7 +129,7 @@ class PlacesService {
     });
 
     final response = await _client.get(url, headers: {
-      'User-Agent': 'ShopFinder/1.0 (https://github.com/yourname)',
+      'User-Agent': 'ServicePlace/1.0',
       'Accept-Language': 'de',
     });
 

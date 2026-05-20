@@ -1,22 +1,15 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import '../config/api_keys.dart';
+import 'backend_service.dart';
 import '../models/shop_model.dart';
 
 class GeminiService {
-  final http.Client _client = http.Client();
-  static const List<String> _models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
-  static const String _endpoint = 'https://generativelanguage.googleapis.com/v1beta/models';
-
   Future<List<Shop>> searchShops({
     required String query,
     required double latitude,
     required double longitude,
     required double radius,
   }) async {
-    if (ApiKeys.geminiApiKey.isEmpty) return [];
-
     final prompt = '''
 Du bist ein lokaler Such-Assistent. Finde bis zu 8 relevante Läden, Restaurants oder Dienstleistungen für die Anfrage: "$query" in der Nähe von ($latitude, $longitude).
 
@@ -39,8 +32,7 @@ Antworte NUR mit dem JSON-Array, keine Erklärungen, kein Markdown.
 ''';
 
     try {
-      final result = await _tryModels(
-        _models,
+      final result = await _callBackend(
         prompt: prompt,
         temperature: 0.2,
         maxTokens: 2048,
@@ -54,8 +46,6 @@ Antworte NUR mit dem JSON-Array, keine Erklärungen, kein Markdown.
   }
 
   Future<Map<String, dynamic>> enrichShopInfo(String shopName, String address) async {
-    if (ApiKeys.geminiApiKey.isEmpty) return {};
-
     final prompt = '''
 Du kennst Google Rezensionen und öffentliche Informationen über "$shopName" ($address).
 
@@ -70,8 +60,7 @@ Nur das JSON-Objekt, keine Erklärungen.
 ''';
 
     try {
-      final result = await _tryModels(
-        _models,
+      final result = await _callBackend(
         prompt: prompt,
         temperature: 0.3,
         maxTokens: 1024,
@@ -113,6 +102,7 @@ Nur das JSON-Objekt, keine Erklärungen.
           rating: _parseDouble(ratingRaw),
           userRatingsTotal: reviewCount,
           phoneNumber: null,
+          email: null,
           website: null,
           types: ['gemini'],
           photoReference: null,
@@ -130,8 +120,6 @@ Nur das JSON-Objekt, keine Erklärungen.
   }
 
   Future<String?> generateShortDescription(String shopName, String address) async {
-    if (ApiKeys.geminiApiKey.isEmpty) return null;
-
     final prompt = '''
 Gib eine sehr kurze Beschreibung (maximal 1 Satz) für "$shopName" in $address.
 Was für ein Geschäft, Restaurant oder Dienstleistung ist es? Was bietet es an?
@@ -139,8 +127,7 @@ Antworte nur mit der Beschreibung, keine Einleitung oder Erklärung.
 ''';
 
     try {
-      final result = await _tryModels(
-        _models,
+      final result = await _callBackend(
         prompt: prompt,
         temperature: 0.3,
         maxTokens: 200,
@@ -163,49 +150,31 @@ Antworte nur mit der Beschreibung, keine Einleitung oder Erklärung.
     return null;
   }
 
-  Future<String?> _tryModels(List<String> models, {required String prompt, double temperature = 0.3, int maxTokens = 1024}) async {
-    for (final model in models) {
-      try {
-        final uri = Uri.parse('$_endpoint/$model:generateContent?key=${ApiKeys.geminiApiKey}');
-        final response = await _client.post(
-          uri,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'contents': [
-              {
-                'parts': [
-                  {'text': prompt}
-                ]
-              }
-            ],
-            'generationConfig': {
-              'temperature': temperature,
-              'maxOutputTokens': maxTokens,
-            },
-          }),
-        );
+  Future<String?> _callBackend({required String prompt, double temperature = 0.3, int maxTokens = 1024}) async {
+    try {
+      final data = await BackendService().post('/api/proxy/gemini', body: {
+        'contents': [
+          {
+            'parts': [
+              {'text': prompt}
+            ]
+          }
+        ],
+        'generationConfig': {
+          'temperature': temperature,
+          'maxOutputTokens': maxTokens,
+        },
+      });
 
-        if (response.statusCode == 429) {
-          debugPrint('Gemini rate limit ($model), trying next model');
-          continue;
-        }
+      if (data == null) return null;
 
-        if (response.statusCode != 200) {
-          debugPrint('Gemini API error ($model): ${response.statusCode}');
-          continue;
-        }
-
-        final responseBody = jsonDecode(response.body) as Map<String, dynamic>?;
-        if (responseBody == null) continue;
-
-        final rawText = _extractResponseText(responseBody);
-        if (rawText.isNotEmpty) return rawText;
-      } catch (e) {
-        debugPrint('Gemini error ($model): $e');
-        continue;
-      }
+      final rawText = _extractResponseText(data);
+      if (rawText.isNotEmpty) return rawText;
+      return null;
+    } catch (e) {
+      debugPrint('Gemini backend proxy error: $e');
+      return null;
     }
-    return null;
   }
 
   String _extractResponseText(Map<String, dynamic> body) {

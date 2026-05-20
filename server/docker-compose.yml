@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nearby_shop_finder
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/nearby_shop_finder
+      JWT_SECRET: dev-jwt-secret-nicht-fuer-produktion-1234567890
+      GOOGLE_APPLICATION_CREDENTIALS: /app/firebase-service-account.json
+      FIREBASE_PROJECT_ID: shopfinder-5f670
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      PORT: 3000
+      NODE_ENV: development
+    volumes:
+      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:
