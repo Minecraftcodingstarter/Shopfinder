@@ -174,7 +174,6 @@ Falls sich etwas geändert hat (z.B. nach Projekt-Updates), aktualisiere die Wer
 Die Datei sollte so aussehen (deine Werte sind bereits eingetragen ✅):
 
 ```dart
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 FirebaseOptions get firebaseOptions {
