@@ -1,7 +1,8 @@
-// lib/supabase_config.dart
-// Supabase Konfiguration
-// WICHTIG: Diese Werte aus deinem Supabase Dashboard holen:
-// Settings → API → Project URL & anon key
+// supabase_config.dart
+// Werte aus Supabase Dashboard: Settings -> API
+// Project URL findest du auch oben in deinem Screenshot:
+//   https://xpliabjafpjnodmqheps.supabase.co
+const String supabaseUrl = 'https://xpliabjafpjnodmqheps.supabase.co';
 
-const String supabaseUrl = 'DEINE_SUPABASE_URL';       // z.B. https://xyzxyz.supabase.co
-const String supabaseAnonKey = 'DEIN_SUPABASE_ANON_KEY'; // langer JWT String
+// anon public key (NICHT der service_role key!) aus Settings -> API -> Project API keys
+const String supabaseAnonKey = 'sb_publishable_d60QlJE6QeItWoQeUHELUQ_GoM_GMgB';
