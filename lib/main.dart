@@ -1,36 +1,28 @@
+// main.dart  (DIREKT-Version: Supabase init, kein localhost-Backend, kein Firebase)
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'firebase_config.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'data/legal_content.dart';
+import 'supabase_config.dart';
 import 'providers/app_settings.dart';
 import 'screens/home_screen.dart';
+import 'screens/legal_page_screen.dart';
 import 'services/auth_service.dart';
 import 'services/backend_service.dart';
 import 'services/company_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: '.env');
 
-  if (kIsWeb) {
-    await Firebase.initializeApp(options: firebaseOptions);
-  } else {
-    await Firebase.initializeApp();
-  }
+  // Supabase initialisieren (ersetzt Firebase + localhost-Backend)
+  await Supabase.initialize(
+    url: supabaseUrl,
+    anonKey: supabaseAnonKey,
+  );
 
-  String backendUrl = dotenv.get('BACKEND_URL', fallback: 'http://localhost:3000');
-  if (!kIsWeb) {
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      backendUrl = 'http://10.0.2.2:3000';
-    }
-  }
-  await BackendService().initialize(baseUrl: backendUrl);
-
+  await BackendService().initialize();
   final settings = AppSettings();
   await settings.loadSettings();
-
+  await AuthService().initialize();
   await CompanyService().initialize();
 
   runApp(ServicePlaceApp(settings: settings));
@@ -47,6 +39,17 @@ class ServicePlaceApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: _buildLightTheme(),
       home: const AuthGate(),
+      routes: {
+        '/impressum': (_) =>
+            const LegalPageScreen(content: LegalContent.impressum),
+        '/datenschutz': (_) =>
+            const LegalPageScreen(content: LegalContent.datenschutz),
+        '/nutzungsbedingungen': (_) =>
+            const LegalPageScreen(content: LegalContent.nutzungsbedingungen),
+        '/agb': (_) => const LegalPageScreen(content: LegalContent.agb),
+        '/cookie-richtlinie': (_) =>
+            const LegalPageScreen(content: LegalContent.cookieRichtlinie),
+      },
     );
   }
 
@@ -54,7 +57,6 @@ class ServicePlaceApp extends StatelessWidget {
     const primary = Color(0xFF1A237E);
     const secondary = Color(0xFF7C4DFF);
     const surface = Color(0xFFF5F7FA);
-
     return ThemeData(
       useMaterial3: true,
       colorScheme: ColorScheme(
@@ -94,14 +96,16 @@ class ServicePlaceApp extends StatelessWidget {
       ),
       navigationBarTheme: NavigationBarThemeData(
         elevation: 8,
-        indicatorShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        indicatorShape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
       ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: Colors.white,
-        indicatorShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        indicatorShape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         labelType: NavigationRailLabelType.all,
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
@@ -142,12 +146,10 @@ class ServicePlaceApp extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: primary, width: 2),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
-      dividerTheme: DividerThemeData(
-        color: Colors.grey[200],
-        thickness: 1,
-      ),
+      dividerTheme: DividerThemeData(color: Colors.grey[200], thickness: 1),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -160,76 +162,12 @@ class ServicePlaceApp extends StatelessWidget {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
       ),
-      textTheme: const TextTheme(
-        headlineLarge: TextStyle(
-          fontSize: 32,
-          fontWeight: FontWeight.w700,
-          color: Color(0xFF1A1A2E),
-          letterSpacing: -0.5,
-        ),
-        headlineMedium: TextStyle(
-          fontSize: 26,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF1A1A2E),
-        ),
-        headlineSmall: TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF1A1A2E),
-        ),
-        titleLarge: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF1A1A2E),
-        ),
-        titleMedium: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF1A1A2E),
-        ),
-        titleSmall: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-          color: Color(0xFF1A1A2E),
-        ),
-        bodyLarge: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w400,
-          color: Color(0xFF333333),
-        ),
-        bodyMedium: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w400,
-          color: Color(0xFF555555),
-        ),
-        bodySmall: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w400,
-          color: Color(0xFF888888),
-        ),
-        labelLarge: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF1A1A2E),
-        ),
-        labelMedium: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-          color: Color(0xFF555555),
-        ),
-        labelSmall: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: Color(0xFF888888),
-        ),
-      ),
     );
   }
 }
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
-
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
@@ -241,18 +179,18 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
-    FirebaseAuth.instance.authStateChanges().listen((user) async {
-      if (user != null) {
-        final userData = await BackendService().verifyFirebaseToken();
-        if (userData != null) {
-          _auth.updateFromBackend(userData);
-        }
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
+      final session = data.session;
+      if (session != null) {
+        final userData = await BackendService().verifySupabaseToken();
+        if (userData != null) _auth.updateFromBackend(userData);
       } else {
         await BackendService().clearToken();
       }
       if (mounted) setState(() {});
     });
-    _auth.initialize(googleClientId: googleWebClientId).then((_) async {
+
+    _auth.initialize().then((_) async {
       if (_auth.isLoggedIn) {
         await _auth.syncWithBackend();
       }
@@ -272,23 +210,18 @@ class _AuthGateState extends State<AuthGate> {
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Theme.of(context).colorScheme.primary,
-                      Theme.of(context).colorScheme.secondary,
-                    ],
-                  ),
+                  gradient: LinearGradient(colors: [
+                    Theme.of(context).colorScheme.primary,
+                    Theme.of(context).colorScheme.secondary,
+                  ]),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Icon(Icons.store, color: Colors.white, size: 40),
               ),
               const SizedBox(height: 24),
-              Text(
-                'ServicePlace',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              Text('ServicePlace',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 32),
               const CircularProgressIndicator(),
             ],
@@ -296,7 +229,6 @@ class _AuthGateState extends State<AuthGate> {
         ),
       );
     }
-
     return const HomeScreen();
   }
 }

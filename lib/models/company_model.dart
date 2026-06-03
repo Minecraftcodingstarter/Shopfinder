@@ -1,6 +1,7 @@
 class Company {
   final String id;
   final String userEmail;
+  final String ownerId;
   String name;
   String description;
   String address;
@@ -26,6 +27,7 @@ class Company {
   Company({
     required this.id,
     required this.userEmail,
+    this.ownerId = '',
     required this.name,
     this.description = '',
     required this.address,
@@ -61,13 +63,20 @@ class Company {
 
   void addReview(CompanyReview review) {
     reviews.add(review);
+    recalculateRating();
+  }
+
+  void recalculateRating() {
     reviewCount = reviews.length;
-    averageRating = reviews.map((r) => r.rating).fold(0.0, (a, b) => a + b) / reviewCount;
+    averageRating = reviewCount > 0
+        ? reviews.map((r) => r.rating).fold(0.0, (a, b) => a + b) / reviewCount
+        : 0.0;
   }
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'userEmail': userEmail,
+    'ownerId': ownerId,
     'name': name,
     'description': description,
     'address': address,
@@ -94,6 +103,7 @@ class Company {
   factory Company.fromJson(Map<String, dynamic> json) => Company(
     id: json['id'] as String,
     userEmail: json['userEmail'] as String? ?? '',
+    ownerId: json['ownerId'] as String? ?? '',
     name: json['name'] as String,
     description: json['description'] as String? ?? '',
     address: json['address'] as String,
@@ -128,6 +138,7 @@ class Company {
 class CompanyReview {
   final String id;
   final String companyId;
+  final String userId;
   final String userName;
   final double rating;
   final String? comment;
@@ -136,6 +147,7 @@ class CompanyReview {
   CompanyReview({
     required this.id,
     required this.companyId,
+    this.userId = '',
     required this.userName,
     required this.rating,
     this.comment,
@@ -145,6 +157,7 @@ class CompanyReview {
   Map<String, dynamic> toJson() => {
     'id': id,
     'companyId': companyId,
+    'userId': userId,
     'userName': userName,
     'rating': rating,
     'comment': comment,
@@ -153,10 +166,11 @@ class CompanyReview {
 
   factory CompanyReview.fromJson(Map<String, dynamic> json) => CompanyReview(
     id: json['id'] as String,
-    companyId: json['companyId'] as String,
+    companyId: json['companyId'] as String? ?? json['companyId'] as String? ?? '',
+    userId: json['userId'] as String? ?? '',
     userName: json['userName'] as String,
     rating: (json['rating'] as num).toDouble(),
     comment: json['comment'] as String?,
-    timestamp: DateTime.parse(json['timestamp'] as String),
+    timestamp: DateTime.parse((json['timestamp'] ?? json['createdAt'] ?? json['created_at']) as String),
   );
 }

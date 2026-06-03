@@ -23,6 +23,7 @@ class Shop {
   final String? facebook;
   final String? instagram;
   final Map<String, dynamic>? rawData;
+  final bool fromDb;
 
   Shop({
     required this.id,
@@ -49,6 +50,7 @@ class Shop {
     this.facebook,
     this.instagram,
     this.rawData,
+    this.fromDb = false,
   });
 
   factory Shop.fromOsmPlace(Map<String, dynamic> place) {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import '../data/legal_content.dart';
 import '../services/company_service.dart';
 import '../services/auth_service.dart';
+import 'legal_page_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -72,6 +74,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: 'Über ServicePlace',
                 subtitle: 'Version 1.0.0',
                 onTap: () => _showAboutDialog(),
+              ),
+              _buildSettingTile(
+                icon: Icons.business,
+                title: 'Impressum',
+                subtitle: 'Angaben gemäß §5 DDG',
+                onTap: () => _openLegal(LegalContent.impressum),
+              ),
+              _buildSettingTile(
+                icon: Icons.shield_outlined,
+                title: 'Datenschutzerklärung',
+                subtitle: 'Informationen gemäß DSGVO',
+                onTap: () => _openLegal(LegalContent.datenschutz),
+              ),
+              _buildSettingTile(
+                icon: Icons.description_outlined,
+                title: 'Nutzungsbedingungen',
+                subtitle: 'Bedingungen für Nutzer',
+                onTap: () => _openLegal(LegalContent.nutzungsbedingungen),
+              ),
+              _buildSettingTile(
+                icon: Icons.article_outlined,
+                title: 'AGB',
+                subtitle: 'Allgemeine Geschäftsbedingungen',
+                onTap: () => _openLegal(LegalContent.agb),
+              ),
+              _buildSettingTile(
+                icon: Icons.cookie_outlined,
+                title: 'Cookie-Richtlinie',
+                subtitle: 'Verwendung von Cookies',
+                onTap: () => _openLegal(LegalContent.cookieRichtlinie),
               ),
             ],
           ),
@@ -187,6 +219,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _openLegal(LegalContent content) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => LegalPageScreen(content: content)),
     );
   }
 

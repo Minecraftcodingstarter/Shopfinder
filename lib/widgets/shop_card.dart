@@ -163,7 +163,9 @@ class ShopCard extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           shop.priceLevel != null && shop.priceLevel!.isNotEmpty
-                              ? '${_priceRangeLabel(shop.priceLevel!)} (geschätzt)'
+                              ? shop.fromDb
+                                  ? _priceRangeLabel(shop.priceLevel!)
+                                  : '${_priceRangeLabel(shop.priceLevel!)} (geschätzt)'
                               : 'Keine Preisangabe',
                           style: TextStyle(
                             fontSize: 12,

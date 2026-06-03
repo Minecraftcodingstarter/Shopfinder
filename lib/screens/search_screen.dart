@@ -219,12 +219,7 @@ class _SearchScreenState extends State<SearchScreen> {
       }
 
       final companyShops = matchedCompanies
-          .where((c) => c.serviceRadius == null || c.serviceRadius! < 0 ||
-              c.serviceRadius! <= 0 ||
-              (c.latitude != null && c.longitude != null &&
-               LocationService.calculateDistance(
-                 latitude, longitude, c.latitude!, c.longitude!,
-               ) <= (c.serviceRadius! * 1000)))
+          .where((c) => c.serviceRadius == null)
           .map(_convertCompanyToShop)
           .toList();
 
@@ -409,6 +404,7 @@ class _SearchScreenState extends State<SearchScreen> {
       isOpen: null,
       description: c.description.isNotEmpty ? c.description : null,
       tags: c.categories,
+      fromDb: true,
     );
   }
 
@@ -1279,7 +1275,9 @@ class _SearchScreenState extends State<SearchScreen> {
                 _buildInfoRow(
                   Icons.attach_money,
                   shop.priceLevel != null
-                      ? '${_priceRangeLabel(shop.priceLevel!)} (geschätzt)'
+                      ? shop.fromDb
+                          ? _priceRangeLabel(shop.priceLevel!)
+                          : '${_priceRangeLabel(shop.priceLevel!)} (geschätzt)'
                       : 'Keine Preisangabe',
                 ),
                 if (shop.distance != null)

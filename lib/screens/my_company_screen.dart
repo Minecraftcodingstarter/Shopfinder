@@ -19,11 +19,19 @@ class _MyCompanyScreenState extends State<MyCompanyScreen> {
   final AuthService _auth = AuthService();
   final PageController _carouselController = PageController();
   int _carouselIndex = 0;
+  bool _loadingCompanies = false;
 
   @override
   void initState() {
     super.initState();
     _companyService.initialize();
+  }
+
+  Future<void> _ensureMyCompanies() async {
+    if (!_auth.isLoggedIn) return;
+    setState(() => _loadingCompanies = true);
+    await _companyService.fetchMyCompanies();
+    if (mounted) setState(() => _loadingCompanies = false);
   }
 
   @override
@@ -35,12 +43,22 @@ class _MyCompanyScreenState extends State<MyCompanyScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_auth.isLoggedIn) {
-      return AuthScreen(onSuccess: () => setState(() {}));
+      return AuthScreen(onSuccess: () {
+        _ensureMyCompanies();
+        setState(() {});
+      });
     }
 
     final companies = _companyService.myCompanies;
     final hasCompany = companies.isNotEmpty;
     final company = hasCompany ? companies.first : null;
+
+    if (_loadingCompanies && !hasCompany) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Mein Unternehmen')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -153,26 +171,65 @@ class _MyCompanyScreenState extends State<MyCompanyScreen> {
 
   Widget _buildImageCarousel(Company company) {
     final images = company.images;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWide = screenWidth >= 800;
+    final bool isVeryNarrow = screenWidth < 480;
+
+    // Sehr schmale Bildschirme: nur ein Bild anzeigen.
+    if (isVeryNarrow && images.length > 1) {
+      return SizedBox(
+        height: 220,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: GestureDetector(
+            onTap: () => _openFullscreenGallery(company, 0),
+            child: Image.network(
+              images[0],
+              fit: BoxFit.cover,
+              width: double.infinity,
+              errorBuilder: (ctx, err, _) => Container(
+                color: Colors.grey[200],
+                child: const Center(child: Icon(Icons.broken_image, size: 48, color: Colors.grey)),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Auf grossen Bildschirmen: Airbnb-Raster (grosses Bild + 2x2 Grid).
+    if (isWide && images.length > 1) {
+      final double maxContentWidth = 1100;
+      return Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxContentWidth),
+          child: _buildGalleryGrid(company, images, 460),
+        ),
+      );
+    }
+
+    // Mittlere Bildschirme (oder nur 1 Bild): wischbares Karussell mit Pfeilen.
     final canGoPrev = _carouselIndex > 0;
     final canGoNext = _carouselIndex < images.length - 1;
 
     return SizedBox(
-      height: 200,
+      height: 220,
       child: Stack(
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(16),
-            child: SizedBox(
+            child: Container(
               width: double.infinity,
+              color: Colors.grey.shade200,
               child: PageView.builder(
                 controller: _carouselController,
                 itemCount: images.length,
                 onPageChanged: (i) => setState(() => _carouselIndex = i),
-                itemBuilder: (ctx, i) => Container(
-                  color: Colors.grey[200],
+                itemBuilder: (ctx, i) => GestureDetector(
+                  onTap: () => _openFullscreenGallery(company, i),
                   child: Image.network(
                     images[i],
-                    fit: BoxFit.contain,
+                    fit: BoxFit.cover,
                     width: double.infinity,
                     errorBuilder: (ctx, err, _) => Container(
                       color: Colors.grey[200],
@@ -228,6 +285,202 @@ class _MyCompanyScreenState extends State<MyCompanyScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildGalleryGrid(Company company, List<String> images, double height) {
+    const gap = 8.0;
+    return SizedBox(
+      height: height,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              flex: 1,
+              child: _galleryTile(company, images, 0),
+            ),
+            const SizedBox(width: gap),
+            Expanded(
+              flex: 1,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: _galleryTile(company, images, 1)),
+                        if (images.length > 2) ...[
+                          const SizedBox(width: gap),
+                          Expanded(child: _galleryTile(company, images, 2)),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (images.length > 3) ...[
+                    const SizedBox(height: gap),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Expanded(child: _galleryTile(company, images, 3)),
+                          if (images.length > 4) ...[
+                            const SizedBox(width: gap),
+                            Expanded(
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  _galleryTile(company, images, 4),
+                                  if (images.length > 5)
+                                    Positioned.fill(
+                                      child: GestureDetector(
+                                        onTap: () => _openFullscreenGallery(company, 4),
+                                        child: Container(
+                                          color: Colors.black.withAlpha(110),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            '+${images.length - 5}',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 26,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _galleryTile(Company company, List<String> images, int index) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => _openFullscreenGallery(company, index),
+        child: Image.network(
+          images[index],
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          errorBuilder: (ctx, err, _) => Container(
+            color: Colors.grey[200],
+            child: Center(child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400])),
+          ),
+          loadingBuilder: (ctx, child, progress) {
+            if (progress == null) return child;
+            return Container(
+              color: Colors.grey[100],
+              child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openFullscreenGallery(Company company, int initialIndex) {
+    final controller = PageController(initialPage: initialIndex);
+    int current = initialIndex;
+    showDialog(
+      context: context,
+      barrierColor: Colors.black,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            final isWide = MediaQuery.of(ctx).size.width >= 800;
+            final canPrev = current > 0;
+            final canNext = current < company.images.length - 1;
+
+            void goPrev() => controller.previousPage(
+                  duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+            void goNext() => controller.nextPage(
+                  duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+
+            return Scaffold(
+              backgroundColor: Colors.black,
+              appBar: AppBar(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                foregroundColor: Colors.white,
+                title: Text(
+                  '${current + 1} / ${company.images.length}',
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                ),
+                leading: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                ),
+              ),
+              body: Stack(
+                alignment: Alignment.center,
+                children: [
+                  PageView.builder(
+                    controller: controller,
+                    itemCount: company.images.length,
+                    onPageChanged: (i) => setDialogState(() => current = i),
+                    itemBuilder: (ctx, i) => InteractiveViewer(
+                      minScale: 1,
+                      maxScale: 4,
+                      child: Center(
+                        child: Image.network(
+                          company.images[i],
+                          fit: BoxFit.contain,
+                          errorBuilder: (ctx, err, _) => const Icon(
+                            Icons.broken_image, size: 64, color: Colors.white24),
+                          loadingBuilder: (ctx, child, progress) {
+                            if (progress == null) return child;
+                            return const Center(
+                              child: CircularProgressIndicator(color: Colors.white));
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (company.images.length > 1 && canPrev)
+                    Positioned(
+                      left: isWide ? 24 : 8,
+                      child: _galleryArrow(Icons.chevron_left, goPrev),
+                    ),
+                  if (company.images.length > 1 && canNext)
+                    Positioned(
+                      right: isWide ? 24 : 8,
+                      child: _galleryArrow(Icons.chevron_right, goNext),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(controller.dispose);
+  }
+
+  Widget _galleryArrow(IconData icon, VoidCallback onTap) {
+    return Material(
+      color: Colors.white.withAlpha(235),
+      shape: const CircleBorder(),
+      elevation: 4,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(icon, size: 30, color: Colors.black87),
+        ),
       ),
     );
   }
@@ -371,29 +624,39 @@ class _MyCompanyScreenState extends State<MyCompanyScreen> {
   }) {
     return Card(
       elevation: 0,
-      color: color.withAlpha(20),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: color.withAlpha(40), width: 1),
+        side: BorderSide(color: Colors.grey[200]!),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 22),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withAlpha(20),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
             const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            ),
+            const SizedBox(height: 2),
             Text(
               value,
               style: TextStyle(
-                fontSize: 18,
+                fontSize: 20,
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
             ),
-            const SizedBox(height: 2),
             Text(
               sub,
-              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 11, color: Colors.grey[400]),
               textAlign: TextAlign.center,
             ),
           ],
@@ -1213,6 +1476,7 @@ class _MyCompanyScreenState extends State<MyCompanyScreen> {
                           final newCompany = Company(
                             id: 'cmp_${now.millisecondsSinceEpoch}',
                             userEmail: userEmail,
+                            ownerId: AuthService().currentUser?.uid ?? '',
                             name: nameCtrl.text.trim(),
                             description: descCtrl.text.trim(),
                             address: resolvedAddress,

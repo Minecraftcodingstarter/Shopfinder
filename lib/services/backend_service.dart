@@ -1,179 +1,183 @@
-import 'dart:convert';
+// lib/services/backend_service.dart
+//
+// DIREKT-VERSION: Kein Node-Server mehr. Alte /api/...-Aufrufe werden
+// hier abgefangen und direkt auf Supabase umgeleitet.
+
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'auth_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class BackendService {
   static final BackendService _instance = BackendService._internal();
   factory BackendService() => _instance;
   BackendService._internal();
 
-  String? _baseUrl;
-  String? _jwtToken;
+  SupabaseClient get _db => Supabase.instance.client;
+
   bool _initialized = false;
-  final http.Client _client = http.Client();
-
-  static const String _jwtKey = 'backend_jwt_token';
-
   Future<void> initialize({String? baseUrl}) async {
-    if (_initialized) return;
-    _baseUrl = baseUrl ?? 'http://localhost:3000';
-    final prefs = await SharedPreferences.getInstance();
-    _jwtToken = prefs.getString(_jwtKey);
     _initialized = true;
   }
 
-  bool get isAuthenticated => _jwtToken != null;
+  bool get isInitialized => _initialized;
+  String? get baseUrl => null;
+  void setBaseUrl(String url) {}
+  bool get isAuthenticated => _db.auth.currentSession != null;
+  String? get _uid => _db.auth.currentUser?.id;
 
-  void setBaseUrl(String url) {
-    _baseUrl = url;
-  }
+  Future<void> clearToken() async {}
 
-  String? get baseUrl => _baseUrl;
-
-  Future<void> _saveToken(String token) async {
-    _jwtToken = token;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_jwtKey, token);
-  }
-
-  Future<void> clearToken() async {
-    _jwtToken = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_jwtKey);
-  }
-
-  Future<Map<String, String>> _headers({bool auth = true}) async {
-    final headers = <String, String>{
-      'Content-Type': 'application/json',
-    };
-    if (auth && _jwtToken != null) {
-      headers['Authorization'] = 'Bearer $_jwtToken';
-    }
-    return headers;
-  }
-
-  Future<Map<String, dynamic>?> _handleResponse(http.Response response) async {
-    final body = jsonDecode(response.body);
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      return body as Map<String, dynamic>?;
-    }
-    final message = body is Map ? (body['message'] ?? 'Unbekannter Fehler') : 'Unbekannter Fehler';
-    debugPrint('Backend API error ${response.statusCode}: $message');
-    throw ApiException(response.statusCode, message.toString());
-  }
-
-  Future<List<dynamic>?> _handleListResponse(http.Response response) async {
-    final body = jsonDecode(response.body);
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      return body as List<dynamic>?;
-    }
-    final message = body is Map ? (body['message'] ?? 'Unbekannter Fehler') : 'Unbekannter Fehler';
-    debugPrint('Backend API error ${response.statusCode}: $message');
-    throw ApiException(response.statusCode, message.toString());
-  }
-
-  String get _url => _baseUrl ?? 'http://localhost:3000';
-
-  Future<Map<String, dynamic>?> get(String path, {Map<String, String>? queryParams, bool auth = true}) async {
+  Future<Map<dynamic, dynamic>?> verifySupabaseToken() async {
+    final user = _db.auth.currentUser;
+    if (user == null) return null;
     try {
-      var uri = Uri.parse('$_url$path');
-      if (queryParams != null && queryParams.isNotEmpty) {
-        uri = uri.replace(queryParameters: queryParams);
+      final row = await _db
+          .from('users')
+          .select('email, display_name, phone_number')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (row == null) {
+        return {
+          'email': user.email,
+          'displayName': user.userMetadata?['display_name'],
+          'phoneNumber': user.phone,
+        };
       }
-      final response = await _client.get(uri, headers: await _headers(auth: auth));
-      final result = await _handleResponse(response);
-      return result;
+      return {
+        'email': row['email'],
+        'displayName': row['display_name'],
+        'phoneNumber': row['phone_number'],
+      };
     } catch (e) {
-      if (e is ApiException) rethrow;
-      debugPrint('Backend GET error: $e');
-      return null;
+      debugPrint('verifySupabaseToken (direct) error: $e');
+      return {
+        'email': user.email,
+        'displayName': user.userMetadata?['display_name'],
+      };
     }
   }
 
-  Future<List<dynamic>?> getList(String path, {Map<String, String>? queryParams, bool auth = true}) async {
-    try {
-      var uri = Uri.parse('$_url$path');
-      if (queryParams != null && queryParams.isNotEmpty) {
-        uri = uri.replace(queryParameters: queryParams);
-      }
-      final response = await _client.get(uri, headers: await _headers(auth: auth));
-      final result = await _handleListResponse(response);
-      return result;
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      debugPrint('Backend GET list error: $e');
-      return null;
-    }
-  }
+  // --- Kompatibilitaets-Router: alte /api/...-Pfade -> Supabase ---
 
-  Future<Map<String, dynamic>?> post(String path, {Map<String, dynamic>? body, bool auth = true}) async {
-    try {
-      final uri = Uri.parse('$_url$path');
-      final response = await _client.post(
-        uri,
-        headers: await _headers(auth: auth),
-        body: body != null ? jsonEncode(body) : null,
+    Future<Map<String, dynamic>> post(
+    String path, {
+    Map<String, dynamic>? body,
+    bool auth = true, // wird ignoriert, Supabase regelt Auth selbst
+  }) async {
+
+    body ??= {};
+
+    if (path == '/api/proxy/gemini') {
+      throw ApiException(
+        501,
+        'Gemini lief ueber den Node-Server. Ohne Server bitte eine Supabase '
+        'Edge Function "gemini" anlegen.',
       );
-      final data = await _handleResponse(response);
-      return data;
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      debugPrint('Backend POST error: $e');
-      return null;
     }
+
+    if (path == '/api/services') {
+      final uid = _requireUid();
+      final insert = {
+        'provider_id': uid,
+        'title': body['title'],
+        'description': body['description'],
+        'category_id': body['category_id'] ?? body['categoryId'],
+        'price': body['price'],
+        'price_unit': body['price_unit'] ?? body['priceUnit'] ?? '\u20AC',
+        'location': body['location'],
+        'latitude': body['latitude'],
+        'longitude': body['longitude'],
+      }..removeWhere((_, v) => v == null);
+      final row = await _db.from('services').insert(insert).select().single();
+      return Map<String, dynamic>.from(row);
+    }
+
+    final reviewMatch =
+        RegExp(r'^/api/services/([^/]+)/reviews$').firstMatch(path);
+    if (reviewMatch != null) {
+      final uid = _requireUid();
+      final row = await _db
+          .from('service_reviews')
+          .insert({
+            'user_id': uid,
+            'service_id': reviewMatch.group(1),
+            'rating': body['rating'],
+            'comment': body['comment'],
+          })
+          .select()
+          .single();
+      return Map<String, dynamic>.from(row);
+    }
+
+    final reportMatch =
+        RegExp(r'^/api/reports/companies/([^/]+)/report$').firstMatch(path);
+    if (reportMatch != null) {
+      final row = await _db
+          .from('company_reports')
+          .insert({
+            'company_id': reportMatch.group(1),
+            'reporter_email': body['reporter_email'] ??
+                body['reporterEmail'] ??
+                _db.auth.currentUser?.email ??
+                '',
+            'reason': body['reason'],
+          })
+          .select()
+          .single();
+      return Map<String, dynamic>.from(row);
+    }
+
+    throw ApiException(404, 'Unbekannter POST-Pfad: $path');
   }
 
-  Future<Map<String, dynamic>?> put(String path, {Map<String, dynamic>? body, bool auth = true}) async {
-    try {
-      final uri = Uri.parse('$_url$path');
-      final response = await _client.put(
-        uri,
-        headers: await _headers(auth: auth),
-        body: body != null ? jsonEncode(body) : null,
-      );
-      return await _handleResponse(response);
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      debugPrint('Backend PUT error: $e');
-      return null;
+    Future<void> delete(String path, {bool auth = true}) async {
+    final m = RegExp(r'^/api/services/([^/]+)$').firstMatch(path);
+    if (m != null) {
+      _requireUid();
+      await _db.from('services').delete().eq('id', m.group(1)!);
+      return;
     }
+    throw ApiException(404, 'Unbekannter DELETE-Pfad: $path');
   }
 
-  Future<Map<String, dynamic>?> delete(String path, {bool auth = true}) async {
-    try {
-      final uri = Uri.parse('$_url$path');
-      final response = await _client.delete(uri, headers: await _headers(auth: auth));
-      return await _handleResponse(response);
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      debugPrint('Backend DELETE error: $e');
-      return null;
+    Future<List<dynamic>> getList(
+    String path, {
+    Map<String, dynamic>? query,
+    Map<String, dynamic>? queryParams,
+    bool auth = true, // wird ignoriert
+  }) async {
+    query ??= queryParams ?? {};
+
+
+    final reviewMatch =
+        RegExp(r'^/api/services/([^/]+)/reviews$').firstMatch(path);
+    if (reviewMatch != null) {
+      final rows = await _db
+          .from('service_reviews')
+          .select()
+          .eq('service_id', reviewMatch.group(1)!)
+          .order('created_at', ascending: false);
+      return List<dynamic>.from(rows);
     }
-  }
 
-  Future<Map<String, dynamic>?> verifyFirebaseToken() async {
-    try {
-      final user = AuthService().currentUser;
-      if (user == null) return null;
-
-      final firebaseUser = AuthService().firebaseUser;
-      if (firebaseUser == null) return null;
-
-      final idToken = await firebaseUser.getIdToken();
-      if (idToken == null) return null;
-
-      final result = await post('/api/auth/verify', body: {'idToken': idToken}, auth: false);
-      if (result != null && result['token'] != null) {
-        await _saveToken(result['token'] as String);
-        return result['user'] as Map<String, dynamic>?;
+    if (path == '/api/services') {
+      var q = _db.from('services').select();
+      if (query['category_id'] != null) {
+        q = q.eq('category_id', query['category_id']);
       }
-      return null;
-    } catch (e) {
-      debugPrint('Backend verify error: $e');
-      return null;
+      if (query['provider_id'] != null) {
+        q = q.eq('provider_id', query['provider_id']);
+      }
+      final rows = await q.order('created_at', ascending: false);
+      return List<dynamic>.from(rows);
     }
+
+    throw ApiException(404, 'Unbekannter GET-Pfad: $path');
+  }
+
+  String _requireUid() {
+    final uid = _uid;
+    if (uid == null) throw ApiException(401, 'Nicht eingeloggt.');
+    return uid;
   }
 }
 

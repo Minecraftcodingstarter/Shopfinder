@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
-import 'package:google_sign_in/google_sign_in.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'backend_service.dart';
 
 class AuthUser {
@@ -24,60 +23,42 @@ class AuthService {
   factory AuthService() => _instance;
   AuthService._internal();
 
-  final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
-  GoogleSignIn? _googleSignIn;
-  String? _googleClientId;
-  bool _googleSignInAvailable = false;
-
+  final _client = Supabase.instance.client;
   AuthUser? _currentUser;
-  firebase_auth.User? get firebaseUser => _auth.currentUser;
+  String? _pendingPhoneNumber;
 
+  User? get supabaseUser => _client.auth.currentUser;
   AuthUser? get currentUser => _currentUser;
   bool get isLoggedIn => _currentUser != null;
   bool get isEmailVerified => _currentUser?.isVerified ?? false;
-  bool get isGoogleSignInAvailable => _googleSignInAvailable;
 
-  Future<void> initialize({String? googleClientId}) async {
-    if (googleClientId != null) _googleClientId = googleClientId;
-    final user = _auth.currentUser;
-    if (user != null) {
-      _currentUser = _fromFirebaseUser(user);
+  Future<void> initialize() async {
+    final session = _client.auth.currentSession;
+    if (session != null) {
+      _currentUser = _fromSupabaseUser(session.user);
     }
-    _tryInitGoogleSignIn();
-    _auth.authStateChanges().listen((user) {
-      if (user != null) {
-        _currentUser = _fromFirebaseUser(user);
+
+    _client.auth.onAuthStateChange.listen((data) {
+      final session = data.session;
+      if (session != null) {
+        _currentUser = _fromSupabaseUser(session.user);
       } else {
         _currentUser = null;
       }
     });
   }
 
-  void _tryInitGoogleSignIn() {
-    if (_googleSignIn != null) return;
-    try {
-      if (_googleClientId != null) {
-        _googleSignIn = GoogleSignIn(clientId: _googleClientId);
-      } else {
-        _googleSignIn = GoogleSignIn();
-      }
-      _googleSignInAvailable = true;
-    } catch (_) {
-      _googleSignIn = null;
-      _googleSignInAvailable = false;
-    }
-  }
-
-  AuthUser _fromFirebaseUser(firebase_auth.User user) {
+  AuthUser _fromSupabaseUser(User user) {
     return AuthUser(
       email: user.email ?? '',
-      name: user.displayName ?? '',
-      isVerified: user.emailVerified || user.phoneNumber != null,
-      uid: user.uid,
-      phoneNumber: user.phoneNumber ?? '',
+      name: user.userMetadata?['display_name'] as String? ?? '',
+      isVerified: user.emailConfirmedAt != null,
+      uid: user.id,
+      phoneNumber: user.phone ?? '',
     );
   }
 
+  /// Registrierung mit E-Mail & Passwort
   Future<String?> register(String email, String password, {String name = ''}) async {
     final cleanEmail = email.trim().toLowerCase();
     if (cleanEmail.isEmpty) return 'Bitte geben Sie eine E-Mail-Adresse ein.';
@@ -85,166 +66,173 @@ class AuthService {
     if (password.length < 6) return 'Passwort muss mindestens 6 Zeichen lang sein.';
 
     try {
-      final cred = await _auth.createUserWithEmailAndPassword(
+      final response = await _client.auth.signUp(
         email: cleanEmail,
         password: password,
+        data: {'display_name': name},
       );
-      if (name.isNotEmpty) {
-        await cred.user?.updateDisplayName(name);
+
+      if (response.user != null) {
+        _currentUser = _fromSupabaseUser(response.user!);
+        return null; // Erfolg
       }
-      await cred.user?.sendEmailVerification();
-      _currentUser = _fromFirebaseUser(cred.user!);
-      return null;
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      switch (e.code) {
-        case 'email-already-in-use':
-          return 'Diese E-Mail ist bereits registriert.';
-        case 'weak-password':
-          return 'Das Passwort ist zu schwach.';
-        case 'invalid-email':
-          return 'Ungültiges E-Mail-Format.';
-        case 'operation-not-allowed':
-          return 'E-Mail/Passwort-Anmeldung ist in der Firebase Console nicht aktiviert. '
-              'Gehe zu Authentication → Sign-in method → E-Mail/Passwort → Aktivieren.';
-        default:
-          return 'Registrierung fehlgeschlagen: ${e.message}';
+      return 'Registrierung fehlgeschlagen.';
+    } on AuthException catch (e) {
+      if (e.message.contains('already registered')) {
+        return 'Diese E-Mail ist bereits registriert.';
       }
+      return 'Registrierung fehlgeschlagen: ${e.message}';
     } catch (e) {
       return 'Ein Fehler ist aufgetreten: $e';
     }
   }
 
+  /// Login mit E-Mail & Passwort
   Future<String?> login(String email, String password) async {
     final cleanEmail = email.trim().toLowerCase();
     if (cleanEmail.isEmpty) return 'Bitte geben Sie Ihre E-Mail-Adresse ein.';
     if (!_isValidEmail(cleanEmail)) return 'Ungültiges E-Mail-Format.';
 
     try {
-      final cred = await _auth.signInWithEmailAndPassword(
+      final response = await _client.auth.signInWithPassword(
         email: cleanEmail,
         password: password,
       );
 
-      if (!cred.user!.emailVerified) {
-        _currentUser = _fromFirebaseUser(cred.user!);
+      if (response.user == null) return 'Anmeldung fehlgeschlagen.';
+
+      if (response.user!.emailConfirmedAt == null) {
+        _currentUser = _fromSupabaseUser(response.user!);
         return 'Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse. Wir haben einen Bestätigungslink an $cleanEmail gesendet.';
       }
 
-      _currentUser = _fromFirebaseUser(cred.user!);
+      _currentUser = _fromSupabaseUser(response.user!);
       await syncWithBackend();
       return null;
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      switch (e.code) {
-        case 'user-not-found':
-          return 'Kein Konto mit dieser E-Mail gefunden.';
-        case 'wrong-password':
-          return 'Falsches Passwort.';
-        case 'invalid-credential':
-          return 'Falsche E-Mail oder Passwort.';
-        case 'invalid-email':
-          return 'Ungültiges E-Mail-Format.';
-        case 'too-many-requests':
-          return 'Zu viele Fehlversuche. Bitte versuchen Sie es später erneut.';
-        default:
-          return 'Anmeldung fehlgeschlagen: ${e.message}';
+    } on AuthException catch (e) {
+      if (e.message.contains('Invalid login credentials')) {
+        return 'Falsche E-Mail oder Passwort.';
       }
+      if (e.message.contains('Email not confirmed')) {
+        return 'Bitte bestätigen Sie Ihre E-Mail-Adresse.';
+      }
+      return 'Anmeldung fehlgeschlagen: ${e.message}';
     } catch (e) {
       return 'Ein Fehler ist aufgetreten: $e';
     }
   }
 
+  /// Google Sign-In
   Future<String?> signInWithGoogle() async {
-    if (!_googleSignInAvailable || _googleSignIn == null) {
-      return 'Google Sign-In ist nicht verfügbar. Web Client ID fehlt. Siehe web/index.html oder firebase_config.dart.';
-    }
-
     try {
-      final googleAccount = await _googleSignIn!.signIn();
-      if (googleAccount == null) return 'Google Sign-In abgebrochen.';
-
-      final googleAuth = await googleAccount.authentication;
-      final credential = firebase_auth.GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken ?? googleAuth.accessToken,
+      await _client.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: kIsWeb ? null : 'io.supabase.shopfinder://login-callback/',
       );
-
-      final cred = await _auth.signInWithCredential(credential);
-      _currentUser = _fromFirebaseUser(cred.user!);
-      await syncWithBackend();
       return null;
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      if (e.code == 'account-exists-with-different-credential') {
-        return 'Ein Konto existiert bereits mit dieser E-Mail über einen anderen Anbieter.';
-      }
-      if (e.code == 'invalid-credential') {
-        return 'Google-Anmeldung fehlgeschlagen. Prüfe ob Firebase Google Auth aktiviert ist.';
-      }
-      return 'Google Sign-In fehlgeschlagen (${e.code}): ${e.message}';
+    } on AuthException catch (e) {
+      return 'Google Sign-In fehlgeschlagen: ${e.message}';
     } catch (e) {
       return 'Google Sign-In fehlgeschlagen: $e';
     }
   }
 
-  String? _verificationId;
-  bool _autoSignedIn = false;
+  /// Bestätigungs-E-Mail erneut senden
+  Future<void> sendVerificationEmail() async {
+    final user = _client.auth.currentUser;
+    if (user != null) {
+      await _client.auth.resend(email: user.email, type: OtpType.signup);
+    }
+  }
 
-  void sendPhoneCode({
+  /// Google Sign-In Verfügbarkeit (mit Supabase OAuth immer verfügbar)
+  bool get isGoogleSignInAvailable => true;
+
+  /// SMS-Code senden (Phone Auth)
+  Future<void> sendPhoneCode({
     required String phoneNumber,
     required void Function() onCodeSent,
     required void Function(String error) onError,
     required void Function() onAutoVerified,
-  }) {
-    _autoSignedIn = false;
-    _auth.verifyPhoneNumber(
-      phoneNumber: phoneNumber,
-      verificationCompleted: (credential) async {
-        await _auth.signInWithCredential(credential);
-        _currentUser = _fromFirebaseUser(_auth.currentUser!);
-        await syncWithBackend();
-        _autoSignedIn = true;
-        onAutoVerified();
-      },
-      verificationFailed: (e) {
-        onError(e.message ?? 'Verifikation fehlgeschlagen');
-      },
-      codeSent: (verificationId, forceResendingToken) {
-        _verificationId = verificationId;
-        onCodeSent();
-      },
-      codeAutoRetrievalTimeout: (verificationId) {
-        _verificationId = verificationId;
-      },
-    );
+  }) async {
+    _pendingPhoneNumber = phoneNumber;
+    try {
+      await _client.auth.signInWithOtp(phone: phoneNumber);
+      onCodeSent();
+    } on AuthException catch (e) {
+      onError(e.message);
+    } catch (e) {
+      onError('Ein Fehler ist aufgetreten: $e');
+    }
   }
 
-  Future<String?> verifyPhoneCode(String smsCode) async {
-    if (_verificationId == null) {
-      return 'Keine Verifikations-ID vorhanden. Bitte senden Sie zuerst einen Code.';
+  /// SMS-Code verifizieren
+  Future<String?> verifyPhoneCode(String code) async {
+    final phone = _pendingPhoneNumber;
+    if (phone == null || phone.isEmpty) {
+      return 'Keine Telefonnummer vorhanden.';
     }
     try {
-      final credential = firebase_auth.PhoneAuthProvider.credential(
-        verificationId: _verificationId!,
-        smsCode: smsCode,
+      final response = await _client.auth.verifyOTP(
+        phone: phone,
+        token: code,
+        type: OtpType.sms,
       );
-      await _auth.signInWithCredential(credential);
-      _currentUser = _fromFirebaseUser(_auth.currentUser!);
-      await syncWithBackend();
-      return null;
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      switch (e.code) {
-        case 'invalid-verification-code':
-          return 'Falscher Bestätigungscode.';
-        case 'session-expired':
-          return 'Die Sitzung ist abgelaufen. Bitte senden Sie einen neuen Code.';
-        default:
-          return 'Fehler: ${e.message}';
+      if (response.session != null) {
+        _currentUser = _fromSupabaseUser(response.session!.user);
+        await syncWithBackend();
+        return null;
       }
+      return 'Verifikation fehlgeschlagen.';
+    } on AuthException catch (e) {
+      if (e.message.toLowerCase().contains('invalid')) {
+        return 'Falscher Bestätigungscode.';
+      }
+      if (e.message.toLowerCase().contains('expired')) {
+        return 'Der Code ist abgelaufen. Bitte senden Sie einen neuen Code.';
+      }
+      return 'Fehler: ${e.message}';
     } catch (e) {
       return 'Ein Fehler ist aufgetreten: $e';
     }
   }
 
-  void updateFromBackend(Map<String, dynamic> userData) {
+  /// Passwort zurücksetzen
+  Future<String?> resetPassword(String email) async {
+    final cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail.isEmpty) return 'Bitte geben Sie Ihre E-Mail-Adresse ein.';
+    if (!_isValidEmail(cleanEmail)) return 'Ungültiges E-Mail-Format.';
+
+    try {
+      await _client.auth.resetPasswordForEmail(cleanEmail);
+      return null;
+    } on AuthException catch (e) {
+      return 'Fehler: ${e.message}';
+    } catch (e) {
+      return 'Ein Fehler ist aufgetreten: $e';
+    }
+  }
+
+  /// Verifizierungsstatus prüfen
+  Future<bool> verifyEmail() async {
+    try {
+      await _client.auth.refreshSession();
+    } catch (_) {
+      return false;
+    }
+    final user = _client.auth.currentUser;
+    if (user != null && user.emailConfirmedAt != null) {
+      _currentUser = _fromSupabaseUser(user);
+      return true;
+    }
+    return false;
+  }
+
+  void updateFromSupabaseSession(Session session) {
+    _currentUser = _fromSupabaseUser(session.user);
+  }
+
+  void updateFromBackend(Map<dynamic, dynamic> userData) {
     _currentUser = AuthUser(
       email: userData['email'] as String? ?? _currentUser?.email ?? '',
       name: userData['displayName'] as String? ?? _currentUser?.name ?? '',
@@ -254,49 +242,9 @@ class AuthService {
     );
   }
 
-  Future<String?> resetPassword(String email) async {
-    final cleanEmail = email.trim().toLowerCase();
-    if (cleanEmail.isEmpty) return 'Bitte geben Sie Ihre E-Mail-Adresse ein.';
-    if (!_isValidEmail(cleanEmail)) return 'Ungültiges E-Mail-Format.';
-
-    try {
-      await _auth.sendPasswordResetEmail(email: cleanEmail);
-      return null;
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      switch (e.code) {
-        case 'user-not-found':
-          return 'Kein Konto mit dieser E-Mail gefunden.';
-        case 'invalid-email':
-          return 'Ungültiges E-Mail-Format.';
-        default:
-          return 'Fehler: ${e.message}';
-      }
-    } catch (e) {
-      return 'Ein Fehler ist aufgetreten: $e';
-    }
-  }
-
-  Future<bool> verifyEmail() async {
-    final user = _auth.currentUser;
-    if (user == null) return false;
-    await user.reload();
-    if (user.emailVerified) {
-      _currentUser = _fromFirebaseUser(user);
-      return true;
-    }
-    return false;
-  }
-
-  Future<void> sendVerificationEmail() async {
-    final user = _auth.currentUser;
-    if (user != null && !user.emailVerified) {
-      await user.sendEmailVerification();
-    }
-  }
-
   Future<void> syncWithBackend() async {
     try {
-      final userData = await BackendService().verifyFirebaseToken();
+      final userData = await BackendService().verifySupabaseToken();
       if (userData != null) {
         updateFromBackend(userData);
       }
@@ -306,12 +254,7 @@ class AuthService {
   }
 
   Future<void> logout() async {
-    await _auth.signOut();
-    try {
-      if (_googleSignIn != null) {
-        await _googleSignIn!.signOut();
-      }
-    } catch (_) {}
+    await _client.auth.signOut();
     _currentUser = null;
   }
 

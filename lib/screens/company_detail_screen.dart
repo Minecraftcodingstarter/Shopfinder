@@ -6,6 +6,7 @@ import '../models/shop_model.dart';
 import '../services/company_service.dart';
 import '../services/auth_service.dart';
 import '../services/backend_service.dart';
+import 'auth_screen.dart';
 
 class CompanyDetailScreen extends StatefulWidget {
   final Shop shop;
@@ -22,19 +23,11 @@ class CompanyDetailScreen extends StatefulWidget {
 }
 
 class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
-  int _currentImageIndex = 0;
   Company _company = Company(id: '', name: '', address: '', userEmail: '');
   bool _loadingReviews = true;
-  final PageController _pageController = PageController();
 
   Shop get shop => widget.shop;
   Company get company => _company;
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
 
   @override
   void initState() {
@@ -139,125 +132,337 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
 
   Widget _buildImageCarousel() {
     if (company.images.isEmpty) {
-      return Container(
-        height: 240,
-        width: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Theme.of(context).colorScheme.primaryContainer,
-              Theme.of(context).colorScheme.secondaryContainer,
-            ],
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            height: 240,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Theme.of(context).colorScheme.primaryContainer,
+                  Theme.of(context).colorScheme.secondaryContainer,
+                ],
+              ),
+            ),
+            child: Center(
+              child: company.logoUrl.isNotEmpty
+                  ? ClipOval(
+                      child: Image.network(company.logoUrl, width: 100, height: 100, fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _buildEmptyLetter(),
+                      ),
+                    )
+                  : _buildEmptyLetter(),
+            ),
           ),
-        ),
-        child: Center(
-          child: company.logoUrl.isNotEmpty
-              ? ClipOval(
-                  child: Image.network(company.logoUrl, width: 100, height: 100, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _buildEmptyLetter(),
-                  ),
-                )
-              : _buildEmptyLetter(),
         ),
       );
     }
 
-    final canGoPrev = _currentImageIndex > 0;
-    final canGoNext = _currentImageIndex < company.images.length - 1;
+    final images = company.images;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWide = screenWidth >= 800;
+    final bool isVeryNarrow = screenWidth < 480;
 
-    return Stack(
-      children: [
-        SizedBox(
-          height: 260,
-          width: double.infinity,
-          child: PageView.builder(
-            controller: _pageController,
-            itemCount: company.images.length,
-            onPageChanged: (i) => setState(() => _currentImageIndex = i),
-            itemBuilder: (ctx, i) => ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                color: Colors.grey[200],
-                child: Image.network(
-                company.images[i],
-                fit: BoxFit.contain,
+    // Sehr schmale Bildschirme: nur ein Bild anzeigen.
+    if (isVeryNarrow && images.length > 1) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: GestureDetector(
+            onTap: () => _openFullscreenGallery(0),
+            child: SizedBox(
+              height: 260,
+              width: double.infinity,
+              child: Image.network(
+                images[0],
+                fit: BoxFit.cover,
                 errorBuilder: (ctx, err, _) => Container(
                   color: Colors.grey[200],
-                  child: Center(
-                    child: Icon(Icons.broken_image, size: 48, color: Colors.grey[400]),
-                  ),
+                  child: const Center(child: Icon(Icons.broken_image, size: 48, color: Colors.grey)),
                 ),
-                loadingBuilder: (ctx, child, progress) {
-                  if (progress == null) return child;
-                  return Container(
-                    color: Colors.grey[100],
-                    child: const Center(child: CircularProgressIndicator()),
-                  );
-                },
               ),
             ),
           ),
         ),
+      );
+    }
+
+    // Begrenzte, zentrierte Breite auf grossen Bildschirmen.
+    final double maxContentWidth = isWide ? 1100 : double.infinity;
+    final double galleryHeight = isWide ? 460 : 280;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxContentWidth),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(16, isWide ? 24 : 16, 16, 0),
+          child: _buildGalleryGrid(images, galleryHeight, isWide),
         ),
-        if (company.images.length > 1 && canGoPrev)
-          Positioned(
-            left: 8,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: IconButton(
-                icon: const Icon(Icons.chevron_left, size: 32, color: Colors.white),
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.black38,
-                  padding: const EdgeInsets.all(4),
-                ),
-                onPressed: () => _pageController.previousPage(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                ),
-              ),
+      ),
+    );
+  }
+
+  Widget _buildGalleryGrid(List<String> images, double height, bool isWide) {
+    // Einzelnes Bild -> volle Breite.
+    if (images.length == 1) {
+      return SizedBox(
+        height: isWide ? 420 : 260,
+        child: _galleryTile(0, radius: 24),
+      );
+    }
+
+    const gap = 8.0;
+
+    final grid = SizedBox(
+      height: height,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Grosses Hauptbild links (Airbnb-Stil).
+            Expanded(
+              flex: 1,
+              child: _galleryTile(0, radius: 0),
             ),
-          ),
-        if (company.images.length > 1 && canGoNext)
-          Positioned(
-            right: 8,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: IconButton(
-                icon: const Icon(Icons.chevron_right, size: 32, color: Colors.white),
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.black38,
-                  padding: const EdgeInsets.all(4),
-                ),
-                onPressed: () => _pageController.nextPage(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                ),
-              ),
-            ),
-          ),
-        if (company.images.length > 1)
-          Positioned(
-            bottom: 12,
-            left: 0,
-            right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(company.images.length, (i) {
-                return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: i == _currentImageIndex ? 20 : 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: i == _currentImageIndex ? Theme.of(context).colorScheme.primary : Colors.white.withAlpha(180),
-                    borderRadius: BorderRadius.circular(4),
+            const SizedBox(width: gap),
+            // Rechtes 2x2 Raster.
+            Expanded(
+              flex: 1,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: _galleryTile(1, radius: 0)),
+                        if (images.length > 2) ...[
+                          const SizedBox(width: gap),
+                          Expanded(child: _galleryTile(2, radius: 0)),
+                        ],
+                      ],
+                    ),
                   ),
-                );
-              }),
+                  if (images.length > 3) ...[
+                    const SizedBox(height: gap),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Expanded(child: _galleryTile(3, radius: 0)),
+                          if (images.length > 4) ...[
+                            const SizedBox(width: gap),
+                            Expanded(
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  _galleryTile(4, radius: 0),
+                                  if (images.length > 5)
+                                    Positioned.fill(
+                                      child: GestureDetector(
+                                        onTap: () => _openFullscreenGallery(4),
+                                        child: Container(
+                                          color: Colors.black.withAlpha(110),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            '+${images.length - 5}',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 26,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
+          ],
+        ),
+      ),
+    );
+
+    // "Alle Fotos anzeigen" Button immer unten rechts ueber dem Raster.
+    return Stack(
+      children: [
+        grid,
+        Positioned(
+          right: 12,
+          bottom: 12,
+          child: _showAllButton(),
+        ),
       ],
+    );
+  }
+
+  Widget _galleryTile(int index, {double height = double.infinity, double radius = 0}) {
+    final tile = SizedBox(
+      height: height,
+      width: double.infinity,
+      child: Image.network(
+        company.images[index],
+        fit: BoxFit.cover,
+        errorBuilder: (ctx, err, _) => Container(
+          color: Colors.grey[200],
+          child: Center(child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400])),
+        ),
+        loadingBuilder: (ctx, child, progress) {
+          if (progress == null) return child;
+          return Container(
+            color: Colors.grey[100],
+            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        },
+      ),
+    );
+    final clickable = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => _openFullscreenGallery(index),
+        child: tile,
+      ),
+    );
+    if (radius > 0) {
+      return ClipRRect(borderRadius: BorderRadius.circular(radius), child: clickable);
+    }
+    return clickable;
+  }
+
+  Widget _showAllButton() {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      elevation: 2,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _openFullscreenGallery(0),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.grid_view_rounded, size: 16, color: Colors.black87),
+              const SizedBox(width: 6),
+              Text(
+                'Alle Fotos anzeigen',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[900],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openFullscreenGallery(int initialIndex) {
+    final controller = PageController(initialPage: initialIndex);
+    int current = initialIndex;
+    showDialog(
+      context: context,
+      barrierColor: Colors.black,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            final isWide = MediaQuery.of(ctx).size.width >= 800;
+            final canPrev = current > 0;
+            final canNext = current < company.images.length - 1;
+
+            void goPrev() => controller.previousPage(
+                  duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+            void goNext() => controller.nextPage(
+                  duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+
+            return Scaffold(
+              backgroundColor: Colors.black,
+              appBar: AppBar(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                foregroundColor: Colors.white,
+                title: Text(
+                  '${current + 1} / ${company.images.length}',
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                ),
+                leading: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                ),
+              ),
+              body: Stack(
+                alignment: Alignment.center,
+                children: [
+                  PageView.builder(
+                    controller: controller,
+                    itemCount: company.images.length,
+                    onPageChanged: (i) => setDialogState(() => current = i),
+                    itemBuilder: (ctx, i) => InteractiveViewer(
+                      minScale: 1,
+                      maxScale: 4,
+                      child: Center(
+                        child: Image.network(
+                          company.images[i],
+                          fit: BoxFit.contain,
+                          errorBuilder: (ctx, err, _) => const Icon(
+                            Icons.broken_image, size: 64, color: Colors.white24),
+                          loadingBuilder: (ctx, child, progress) {
+                            if (progress == null) return child;
+                            return const Center(
+                              child: CircularProgressIndicator(color: Colors.white));
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Pfeil links
+                  if (company.images.length > 1 && canPrev)
+                    Positioned(
+                      left: isWide ? 24 : 8,
+                      child: _galleryArrow(Icons.chevron_left, goPrev),
+                    ),
+                  // Pfeil rechts
+                  if (company.images.length > 1 && canNext)
+                    Positioned(
+                      right: isWide ? 24 : 8,
+                      child: _galleryArrow(Icons.chevron_right, goNext),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(controller.dispose);
+  }
+
+  Widget _galleryArrow(IconData icon, VoidCallback onTap) {
+    return Material(
+      color: Colors.white.withAlpha(235),
+      shape: const CircleBorder(),
+      elevation: 4,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(icon, size: 30, color: Colors.black87),
+        ),
+      ),
     );
   }
 
@@ -490,8 +695,31 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
     );
   }
 
+  bool _isOwnReview(CompanyReview review) {
+    final user = AuthService().currentUser;
+    if (user == null) return false;
+    return review.userId == user.uid;
+  }
+
+  bool _hasUserReviewed() {
+    final user = AuthService().currentUser;
+    if (user == null) return false;
+    return company.reviews.any((r) => r.userId == user.uid || r.userName == user.name || r.userName == user.email);
+  }
+
+  CompanyReview? _myReview() {
+    final user = AuthService().currentUser;
+    if (user == null) return null;
+    try {
+      return company.reviews.firstWhere((r) => r.userId == user.uid || r.userName == user.name || r.userName == user.email);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Widget _buildReviewsSection() {
     final isLoggedIn = AuthService().isLoggedIn;
+    final alreadyReviewed = _hasUserReviewed();
 
     if (company.reviews.isEmpty) {
       return Padding(
@@ -516,12 +744,24 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
               'Noch keine Bewertungen vorhanden.',
               style: TextStyle(fontSize: 14, color: Colors.grey[500]),
             ),
-            if (isLoggedIn) ...[
+            if (isLoggedIn && !alreadyReviewed) ...[
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 icon: const Icon(Icons.rate_review, size: 18),
                 label: const Text('Bewertung schreiben'),
                 onPressed: _showWriteReviewDialog,
+              ),
+            ] else if (!isLoggedIn) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.login, size: 18),
+                label: const Text('Zum Bewerten anmelden'),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => AuthScreen(onSuccess: () => Navigator.pop(context))),
+                  );
+                },
               ),
             ],
           ],
@@ -548,73 +788,121 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                 ),
               ),
               const Spacer(),
-              if (isLoggedIn)
+              if (isLoggedIn && !alreadyReviewed)
                 TextButton.icon(
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('Bewerten'),
                   onPressed: _showWriteReviewDialog,
+                ) else if (alreadyReviewed)
+                Text(
+                  'Du hast bereits bewertet',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                )
+              else
+                TextButton.icon(
+                  icon: const Icon(Icons.login, size: 18),
+                  label: const Text('Anmelden zum Bewerten'),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => AuthScreen(onSuccess: () => Navigator.pop(context))),
+                    );
+                  },
                 ),
             ],
           ),
           const SizedBox(height: 12),
-          ...sorted.map((review) => Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                  child: Text(
-                    review.userName.isNotEmpty ? review.userName[0].toUpperCase() : '?',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.primary,
+          ...sorted.map((review) {
+            final isOwn = _isOwnReview(review);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                    child: Text(
+                      review.userName.isNotEmpty ? review.userName[0].toUpperCase() : '?',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(review.userName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                          Text(
-                            _formatDateShort(review.timestamp),
-                            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(review.userName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                  const SizedBox(height: 2),
+                                  Row(
+                                    children: [
+                                      ...List.generate(5, (i) => Icon(
+                                        i < review.rating.round() ? Icons.star : Icons.star_border,
+                                        color: Colors.amber,
+                                        size: 14,
+                                      )),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        _formatDateShort(review.timestamp),
+                                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (isOwn)
+                              IconButton(
+                                icon: Icon(Icons.edit_outlined, size: 18, color: Colors.grey[400]),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: () => _showWriteReviewDialog(existingReview: review),
+                                tooltip: 'Bearbeiten',
+                              ),
+                          ],
+                        ),
+                        if (review.comment != null && review.comment!.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Padding(
+                            padding: const EdgeInsets.only(right: 32),
+                            child: Text(review.comment!, style: const TextStyle(fontSize: 13)),
                           ),
                         ],
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: List.generate(5, (i) => Icon(
-                          i < review.rating.round() ? Icons.star : Icons.star_border,
-                          color: Colors.amber,
-                          size: 14,
-                        )),
-                      ),
-                      if (review.comment != null && review.comment!.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(review.comment!, style: const TextStyle(fontSize: 13)),
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          )),
+                ],
+              ),
+            );
+          }),
         ],
       ),
     );
   }
 
-  void _showWriteReviewDialog() {
-    int rating = 5;
-    final commentController = TextEditingController();
+  void _showWriteReviewDialog({CompanyReview? existingReview}) {
+    if (!AuthService().isLoggedIn) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => AuthScreen(onSuccess: () => Navigator.pop(context))),
+      );
+      return;
+    }
+
+    final isEditing = existingReview != null;
+    int rating = existingReview?.rating.round() ?? 5;
+    final commentController = TextEditingController(text: existingReview?.comment ?? '');
     final formKey = GlobalKey<FormState>();
 
     showModalBottomSheet(
@@ -645,7 +933,7 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                Text('Bewertung schreiben',
+                Text(isEditing ? 'Bewertung bearbeiten' : 'Bewertung schreiben',
                   style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 16),
@@ -678,9 +966,9 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    icon: const Icon(Icons.send),
-                    label: const Text('Bewertung absenden'),
-                    onPressed: () => _submitReview(rating, commentController.text.trim(), ctx),
+                    icon: Icon(isEditing ? Icons.save : Icons.send),
+                    label: Text(isEditing ? 'Bewertung speichern' : 'Bewertung absenden'),
+                    onPressed: () => _submitReview(rating, commentController.text.trim(), ctx, existingReview: existingReview),
                   ),
                 ),
               ],
@@ -691,24 +979,57 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
     );
   }
 
-  Future<void> _submitReview(int rating, String comment, BuildContext sheetContext) async {
-    final id = DateTime.now().toIso8601String() + Random().nextInt(99999).toString();
-    final review = CompanyReview(
-      id: id,
-      companyId: company.id,
-      userName: AuthService().currentUser?.name ?? 'Unbekannt',
-      rating: rating.toDouble(),
-      comment: comment.isNotEmpty ? comment : null,
-      timestamp: DateTime.now(),
-    );
+  Future<void> _submitReview(int rating, String comment, BuildContext sheetContext, {CompanyReview? existingReview}) async {
+    if (!AuthService().isLoggedIn) {
+      Navigator.pop(sheetContext);
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => AuthScreen(onSuccess: () => Navigator.pop(context))),
+        );
+      }
+      return;
+    }
 
-    await CompanyService().addReview(company.id, review);
-    Navigator.pop(sheetContext);
-    await _loadFullCompany();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bewertung wurde gespeichert!')),
-      );
+    final isEditing = existingReview != null;
+    try {
+      if (isEditing) {
+        await CompanyService().updateReview(
+          company.id,
+          existingReview.id,
+          rating: rating.toDouble(),
+          comment: comment.isNotEmpty ? comment : null,
+        );
+      } else {
+        final id = DateTime.now().toIso8601String() + Random().nextInt(99999).toString();
+        final review = CompanyReview(
+          id: id,
+          companyId: company.id,
+          userName: AuthService().currentUser?.name ?? 'Unbekannt',
+          rating: rating.toDouble(),
+          comment: comment.isNotEmpty ? comment : null,
+          timestamp: DateTime.now(),
+        );
+        await CompanyService().addReview(company.id, review);
+      }
+      Navigator.pop(sheetContext);
+      await _loadFullCompany();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(isEditing ? 'Bewertung wurde aktualisiert!' : 'Bewertung wurde gespeichert!')),
+        );
+      }
+    } catch (e) {
+      Navigator.pop(sheetContext);
+      final msg = e.toString().contains('409') || e.toString().contains('bereits bewertet')
+          ? 'Du hast diese Firma bereits bewertet.'
+          : 'Fehler beim Speichern der Bewertung.';
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+      }
+      await _loadFullCompany();
     }
   }
 

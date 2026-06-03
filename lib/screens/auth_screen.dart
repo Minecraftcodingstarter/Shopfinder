@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../data/legal_content.dart';
 import '../services/auth_service.dart';
+import 'legal_page_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   final VoidCallback onSuccess;
@@ -18,6 +20,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isCheckingVerification = false;
   String? _error;
   String _registeredEmail = '';
+  bool _obscurePassword = true;
 
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
@@ -229,11 +232,53 @@ class _AuthScreenState extends State<AuthScreen> {
                 const SizedBox(height: 24),
                 if (_authMethod == 0) _buildEmailAuth(theme),
                 if (_authMethod == 1) _buildPhoneAuth(theme),
+                const SizedBox(height: 32),
+                _buildLegalLinks(),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildLegalLinks() {
+    return Column(
+      children: [
+        Divider(color: Colors.grey[200]),
+        const SizedBox(height: 12),
+        Text(
+          'Rechtliche Hinweise',
+          style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          alignment: WrapAlignment.center,
+          children: [
+            _legalLink('Impressum', LegalContent.impressum),
+            _legalLink('Datenschutz', LegalContent.datenschutz),
+            _legalLink('Nutzungsbedingungen', LegalContent.nutzungsbedingungen),
+            _legalLink('AGB', LegalContent.agb),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _legalLink(String label, LegalContent content) {
+    return TextButton(
+      onPressed: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => LegalPageScreen(content: content)),
+      ),
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
     );
   }
 
@@ -299,10 +344,12 @@ class _AuthScreenState extends State<AuthScreen> {
           decoration: InputDecoration(
             labelText: 'Passwort',
             prefixIcon: const Icon(Icons.lock_outlined),
-            suffixText: _isLogin ? null : 'min. 6 Zeichen',
-            suffixStyle: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            suffixIcon: IconButton(
+              icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+            ),
           ),
-          obscureText: true,
+          obscureText: _obscurePassword,
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => _submit(),
         ),
